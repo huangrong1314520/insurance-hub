@@ -1892,23 +1892,26 @@ function renderPolicyGrid(policies){
   const ranks = rankOfList(policies);
   policies.forEach((p,idx)=>{
     const st = STATUS_MAP[p.status] || STATUS_MAP.active;
-    const ds = getDateStatus(p.endDate);
+    const cardEnd = effEndDate(p);
+    const ds = getDateStatus(cardEnd);
     const color = TYPE_COLORS[p.type] || "#8a8578";
     const pay = payStatusOf(p);
     const due = dueShort(p);
+    const cardPrem = effPremium(p);
+    const cardAmt = effSumInsured(p);
     html += `<div class="policy-card" style="--accent:${color}" onclick="openDetail('${jsq(p.personId)}','${jsq(p.id)}')">
       <div class="policy-card-top">
         <div class="policy-card-badges">
           <span class="policy-card-type" style="background:${color}">${esc(p.type)}</span>
           ${rankChip(ranks[idx])}
         </div>
-        <div class="policy-card-title">${esc(p.product || p.type)}${currentPerson==='all'?` <span style="font-size:12px;color:var(--text-light)">${esc(p.personIcon)}${esc(p.personName)}</span>`:''}</div>
-        <div class="policy-card-company">${esc(p.company || '—')}</div>
+        <div class="policy-card-title">${esc(p.product || aiFieldText(p,'产品名称') || p.type)}${currentPerson==='all'?` <span style="font-size:12px;color:var(--text-light)">${esc(p.personIcon)}${esc(p.personName)}</span>`:''}</div>
+        <div class="policy-card-company">${esc(p.company || aiFieldText(p,'保险公司') || '—')}</div>
         ${p.policyNo?`<div class="policy-card-no">保单号 ${esc(p.policyNo)}</div>`:''}
         <div class="policy-card-stats">
-          ${p.premium?`<div class="policy-card-stat"><span class="v" style="color:var(--primary)">¥${fmtNum(p.premium)}</span><span class="l">${esc(p.premiumType||'年缴')}</span></div>`:''}
-          ${p.sumInsured?`<div class="policy-card-stat"><span class="v">¥${fmtNum(p.sumInsured)}</span><span class="l">保额</span></div>`:''}
-          ${p.endDate?`<div class="policy-card-stat"><span class="v ${ds.cls}">${esc(p.endDate)}</span><span class="l">到期</span></div>`:''}
+          ${cardPrem?`<div class="policy-card-stat"><span class="v" style="color:var(--primary)">¥${fmtNum(cardPrem)}</span><span class="l">${esc(effPremiumType(p)||'年缴')}</span></div>`:''}
+          ${cardAmt?`<div class="policy-card-stat"><span class="v">¥${fmtNum(cardAmt)}</span><span class="l">保额</span></div>`:''}
+          ${cardEnd?`<div class="policy-card-stat"><span class="v ${ds.cls}">${esc(cardEnd)}</span><span class="l">到期</span></div>`:''}
         </div>
       </div>
       <div class="policy-card-bottom">
@@ -1938,27 +1941,51 @@ function renderTable(policies){
   const ranks = rankOfList(policies);
   policies.forEach((p,idx)=>{
     const st = STATUS_MAP[p.status] || STATUS_MAP.active;
-    const ds = getDateStatus(p.endDate);
+    const tEnd = effEndDate(p);
+    const ds = getDateStatus(tEnd);
     const color = TYPE_COLORS[p.type] || "#8a8578";
     const pay = payStatusOf(p);
     const due = dueShort(p);
+    const tPrem = effPremium(p);
+    const tAmt = effSumInsured(p);
     html += `<tr onclick="openDetail('${jsq(p.personId)}','${jsq(p.id)}')">
       <td>${esc(p.personIcon)} ${esc(p.personName)}</td>
       <td>${rankChip(ranks[idx])}</td>
       <td><span class="type-chip" style="background:${color}">${esc(p.type)}</span></td>
-      <td>${esc(p.product || '—')}</td>
-      <td>${esc(p.company || '—')}</td>
-      <td class="money">${p.premium?'¥'+fmtNum(p.premium):'—'}</td>
-      <td>${p.sumInsured?'¥'+fmtNum(p.sumInsured):'—'}</td>
+      <td>${esc(p.product || aiFieldText(p,'产品名称') || '—')}</td>
+      <td>${esc(p.company || aiFieldText(p,'保险公司') || '—')}</td>
+      <td class="money">${tPrem?'¥'+fmtNum(tPrem):'—'}</td>
+      <td>${tAmt?'¥'+fmtNum(tAmt):'—'}</td>
       <td><span class="status-badge ${st.cls}">${esc(st.label)}</span></td>
       <td>${pay?`<span class="pi-tag ${pay.cls}">${esc(pay.tag)}</span>`:'—'}${due?`<div class="due-mini" title="下次缴费：${esc(dueFull(p))}">🗓 ${esc(due)}</div>`:''}</td>
-      <td><span class="${ds.cls}">${esc(p.endDate)||'长期/未设置'}</span></td>
+      <td><span class="${ds.cls}">${esc(tEnd)||'长期/未设置'}</span></td>
       <td><span class="view-link">查看 →</span></td>
     </tr>`;
   });
   html += `</tbody></table></div>`;
   el.innerHTML = html;
 }
+
+// ========== 电子保单 AI 字段兜底 ==========
+// 保单主字段为空、但已在「电子保单」里用 AI 识别出对应字段时，展示识别值（仅用于显示，不改动原始数据）。
+// 这样后续新增的保单只要导入了电子保单并完成识别，金额/日期等即使没手动回填也能看到。
+function aiFieldsOf(pol){ return (pol && pol.pdfAnalysis && pol.pdfAnalysis.fields) ? pol.pdfAnalysis.fields : null; }
+function aiFieldText(pol, key){
+  const f = aiFieldsOf(pol); if(!f) return null;
+  const v = f[key];
+  return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim();
+}
+function aiFieldNum(pol, key){
+  const s = aiFieldText(pol, key); if(s === null) return null;
+  const n = parseFloat(s.replace(/[^0-9.]/g,''));
+  return isNaN(n) ? null : n;
+}
+const AI_SRC_TAG = ' <span style="font-size:11px;color:var(--text-light);white-space:nowrap">（AI识别）</span>';
+function effPremium(pol){ const v = Number(pol.premium); return v > 0 ? v : aiFieldNum(pol, '保费(元)'); }
+function effSumInsured(pol){ const v = Number(pol.sumInsured); return v > 0 ? v : aiFieldNum(pol, '保额(元)'); }
+function effPremiumType(pol){ return pol.premiumType || aiFieldText(pol, '缴费方式'); }
+function effStartDate(pol){ return pol.startDate || aiFieldText(pol, '生效日期'); }
+function effEndDate(pol){ return pol.endDate || aiFieldText(pol, '到期日期'); }
 
 // ========== 详情 ==========
 function openDetail(personId, policyId){
@@ -1968,15 +1995,15 @@ function openDetail(personId, policyId){
   if(!pol) return;
   const st = STATUS_MAP[pol.status] || STATUS_MAP.active;
   const color = TYPE_COLORS[pol.type] || "#8a8578";
-  document.getElementById("detailTitle").innerHTML = `<span class="type-chip" style="background:${color}">${esc(pol.type)}</span> ${esc(pol.product||'')} ${esc(person.icon)}${esc(person.name)}`;
+  document.getElementById("detailTitle").innerHTML = `<span class="type-chip" style="background:${color}">${esc(pol.type)}</span> ${esc(pol.product || aiFieldText(pol,'产品名称') || '')} ${esc(person.icon)}${esc(person.name)}`;
 
   let body = `<div class="detail-section">
     <h3>📋 基本信息</h3>
     <div class="detail-row"><span class="label">保险类型</span><span class="value">${esc(pol.type)}</span></div>
-    <div class="detail-row"><span class="label">保险公司</span><span class="value">${esc(pol.company||'—')}</span></div>
-    <div class="detail-row"><span class="label">产品名称</span><span class="value">${esc(pol.product||'—')}</span></div>
-    <div class="detail-row"><span class="label">保单号</span><span class="value mono">${esc(pol.policyNo||'—')}</span></div>
-    <div class="detail-row"><span class="label">投保人</span><span class="value">${esc(pol.holder||'—')}</span></div>
+    <div class="detail-row"><span class="label">保险公司</span><span class="value">${esc(pol.company || aiFieldText(pol,'保险公司') || '—')}</span></div>
+    <div class="detail-row"><span class="label">产品名称</span><span class="value">${esc(pol.product || aiFieldText(pol,'产品名称') || '—')}</span></div>
+    <div class="detail-row"><span class="label">保单号</span><span class="value mono">${esc(pol.policyNo || aiFieldText(pol,'保单号码') || '—')}</span></div>
+    <div class="detail-row"><span class="label">投保人</span><span class="value">${esc(pol.holder || aiFieldText(pol,'投保人') || '—')}</span></div>
     <div class="detail-row"><span class="label">被保人</span><span class="value">${esc(person.icon)} ${esc(person.name)}</span></div>
     <div class="detail-row"><span class="label">被保险人证件/出生日期</span><span class="value">${esc(pol.insuredCert||pol.insuredBirth||'—')}</span></div>
     <div class="detail-row"><span class="label">当前状态</span><span class="value"><span class="status-badge ${st.cls}">${st.label}</span></span></div>
@@ -2017,12 +2044,18 @@ function openDetail(personId, policyId){
   }
   body += `</div>`;
 
+  const effPrem = effPremium(pol);
+  const effAmt = effSumInsured(pol);
+  const effPT = effPremiumType(pol);
+  const premFromAi = !(Number(pol.premium) > 0) && effPrem;
+  const amtFromAi = !(Number(pol.sumInsured) > 0) && effAmt;
+  const ptFromAi = !pol.premiumType && effPT;
   body += `<div class="detail-section">
     <h3>💰 保费与保额</h3>
-    <div class="detail-row"><span class="label">年保费</span><span class="value">${pol.premium?'¥'+fmtNum(pol.premium):'—'}</span></div>
-    <div class="detail-row"><span class="label">缴费方式</span><span class="value">${esc(pol.premiumType||'—')}</span></div>
+    <div class="detail-row"><span class="label">年保费</span><span class="value">${effPrem?'¥'+fmtNum(effPrem)+(premFromAi?AI_SRC_TAG:''):'—'}</span></div>
+    <div class="detail-row"><span class="label">缴费方式</span><span class="value">${esc(effPT||'—')}${ptFromAi?AI_SRC_TAG:''}</span></div>
     <div class="detail-row"><span class="label">缴费日期</span><span class="value">${dueFull(pol)}</span></div>
-    <div class="detail-row"><span class="label">保额</span><span class="value">${pol.sumInsured?'¥'+fmtNum(pol.sumInsured):'—'}</span></div>
+    <div class="detail-row"><span class="label">保额</span><span class="value">${effAmt?'¥'+fmtNum(effAmt)+(amtFromAi?AI_SRC_TAG:''):'—'}</span></div>
   </div>`;
 
   body += `<div class="detail-section">
@@ -2031,14 +2064,18 @@ function openDetail(personId, policyId){
     <button class="link-btn primary" onclick="openPaymentModal('${jsq(personId)}','${jsq(pol.id)}')">➕ 添加缴费</button>
   </div>`;
 
+  const effStart = effStartDate(pol);
+  const effEnd = effEndDate(pol);
+  const startFromAi = !pol.startDate && effStart;
+  const endFromAi = !pol.endDate && effEnd;
   body += `<div class="detail-section">
     <h3>📅 保障期限</h3>
-    <div class="detail-row"><span class="label">生效日期</span><span class="value">${esc(pol.startDate||'—')}</span></div>
-    <div class="detail-row"><span class="label">到期日期</span><span class="value">${esc(pol.endDate||'—')}</span></div>`;
-  if(pol.endDate){
-    const d = daysUntilExpiry(pol.endDate);
+    <div class="detail-row"><span class="label">生效日期</span><span class="value">${esc(effStart||'—')}${startFromAi?AI_SRC_TAG:''}</span></div>
+    <div class="detail-row"><span class="label">到期日期</span><span class="value">${esc(effEnd||'—')}${endFromAi?AI_SRC_TAG:''}</span></div>`;
+  if(effEnd){
+    const d = daysUntilExpiry(effEnd);
     if(d !== null){
-      const ds = getDateStatus(pol.endDate);
+      const ds = getDateStatus(effEnd);
       body += `<div class="detail-row"><span class="label">剩余天数</span><span class="value ${ds.cls}">${d>0?d+'天':'已过期'+Math.abs(d)+'天'}</span></div>`;
     }
   }
@@ -2367,13 +2404,15 @@ function fmtYMD(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.
 // 返回 null 表示无法推算（则不展示标注）。
 function premiumDueInfo(pol){
   if(!pol) return null;
-  const pt = String(pol.premiumType||'');
+  const pt = String(effPremiumType(pol)||'');
   if(/趸|一次性|一次交全/.test(pt)) return {kind:'single', label:'趸交（一次性）', date:null, days:null};
-  if(!pol.premium || Number(pol.premium) <= 0) return null;
+  const premAmt = effPremium(pol);
+  if(!premAmt || Number(premAmt) <= 0) return null;
   if(/集中征缴|年底|每年更新/.test(pt)) return {kind:'window', label:'每年年底集中征缴（约9-12月）缴下一年度', date:null, days:null};
-  if(!pol.startDate) return null;
+  const startVal = effStartDate(pol);
+  if(!startVal) return null;
 
-  const parts = String(pol.startDate).split('-').map(Number);
+  const parts = String(startVal).split('-').map(Number);
   if(parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
   const today = new Date(); today.setHours(0,0,0,0);
   let due, kind, label;

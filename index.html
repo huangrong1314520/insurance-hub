@@ -2261,6 +2261,7 @@ function showModal(id){
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('show');
+  if(id === 'pdfViewerModal') _revokePdfBlobUrl();
 }
 let toastTimer = null;
 function showToast(msg){
@@ -2985,39 +2986,54 @@ function answerQuestion(q){
 
 // ========== 电子保单原件查看器 ==========
 // 手机浏览器（iOS Safari / 微信内嵌等）大多不支持 iframe 内嵌 PDF，会显示空白；
-// 移动端改用「直接在新标签打开 PDF 链接」的方式，由浏览器原生 PDF 阅读器渲染。
+// 移动端改用「打开 / 下载」按钮，交由浏览器原生 PDF 阅读器呈现。
+// 公开页面场景：原件存放在私有仓库，凭云同步令牌经 Contents API 取原始字节再交给浏览器。
 function isMobileDevice(){
   return /Android|iPhone|iPad|iPod|Mobile|MicroMessenger|Windows Phone/i.test(navigator.userAgent||'')
     || (window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
 }
-function openPdfViewer(personId, policyId){
+
+// 查看器临时对象链接：打开新原件前先释放上一个，关闭弹窗时释放
+let _pdfBlobUrl = null;
+function _revokePdfBlobUrl(){
+  if(_pdfBlobUrl){ try{ URL.revokeObjectURL(_pdfBlobUrl); }catch(_){} _pdfBlobUrl = null; }
+}
+
+// 统一取 PDF 字节：
+//   ① 已配置云同步 → 用令牌从私有仓库 Contents API 取原始文件（公开页也能看原件）；
+//   ② 原件是绝对地址 / data: / blob: → 直接取；
+//   ③ 未配置 → 按相对路径取（从私有仓库本地打开时可用）。
+async function fetchPolicyPdfBlob(pol){
+  const rel = pol && pol.pdfFile;
+  if(!rel) throw new Error('该保单没有电子保单原件');
+  if(/^(https?:|data:|blob:)/i.test(rel)){
+    const r = await fetch(rel, {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.blob();
+  }
+  const cfg = syncConfig();
+  if(cfg){
+    const encPath = String(rel).split('/').map(encodeURIComponent).join('/');
+    const url = GH_API + '/repos/' + encodeURIComponent(cfg.owner) + '/' + encodeURIComponent(cfg.repo)
+      + '/contents/' + encPath + '?ref=' + encodeURIComponent(cfg.branch || 'main');
+    const res = await fetch(url, {headers:{'Authorization':'Bearer ' + cfg.token, 'Accept':'application/vnd.github.raw'}, cache:'no-store'});
+    if(res.ok) return await res.blob();
+    if(res.status === 404) throw new Error('私有仓库中未找到该原件，请确认令牌对该仓库有 Contents 权限');
+    throw new Error(ghErrText(res));
+  }
+  const r = await fetch(rel, {cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.blob();
+}
+
+async function openPdfViewer(personId, policyId){
   const person = appData.people.find(p=>p.id===personId);
   const pol = person && person.policies.find(p=>p.id===policyId);
   if(!person || !pol) return;
   document.getElementById('pdfViewerTitle').innerHTML = `📄 ${esc(pol.pdfName || pol.product || '电子保单原件')}`;
   const body = document.getElementById('pdfViewerBody');
   const footer = document.getElementById('pdfViewerFooter');
-  if(pol.pdfFile){
-    const mobile = isMobileDevice();
-    if(mobile){
-      // 移动端：不用 iframe，直接给一个大按钮在新页面打开 PDF 原件
-      body.innerHTML = `<div style="text-align:center;padding:24px 16px">
-        <div class="pdf-tip" style="margin-bottom:16px">📱 手机浏览器内嵌 PDF 可能显示空白，请点下方按钮在新页面打开原件，由手机自带的 PDF 阅读器查看。</div>
-        <a class="btn btn-primary" href="${esc(pol.pdfFile)}" target="_blank" rel="noopener" style="font-size:16px;padding:14px 28px;display:inline-block">📄 打开电子保单原件</a>
-      </div>`;
-      footer.innerHTML = `
-        <button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>
-        <a class="btn btn-ghost" href="${esc(pol.pdfFile)}" download>⬇ 下载原件</a>`;
-    } else {
-      // 桌面端：iframe 内嵌查看体验更好
-      body.innerHTML = `<iframe class="pdf-frame" src="${esc(pol.pdfFile)}#toolbar=1&view=FitH" title="电子保单原件"></iframe>
-        <div class="pdf-tip">若上方未显示内容，请点击下方「在新窗口打开」或「下载原件」。<br>文件位置：${esc(pol.pdfFile)}</div>`;
-      footer.innerHTML = `
-        <button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>
-        <a class="btn btn-ghost" href="${esc(pol.pdfFile)}" download>⬇ 下载原件</a>
-        <button class="btn btn-primary" onclick="openPdfNewTab('${jsq(personId)}','${jsq(pol.id)}')">🔗 在新窗口打开</button>`;
-    }
-  } else {
+  if(!pol.pdfFile){
     const atts = (pol.attachments && pol.attachments.length)
       ? `<div class="att-grid">` + pol.attachments.map(a=>`<div class="att-item"><img src="${a.dataUrl}" alt="${esc(a.name)}" onclick="previewImage(this.src)"></div>`).join('') + `</div>`
       : `<div class="chat-hint" style="text-align:center;margin-top:10px">暂无凭证截图，可点击「导入PDF/截图」上传</div>`;
@@ -3025,32 +3041,61 @@ function openPdfViewer(personId, policyId){
     footer.innerHTML = `
       <button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>
       <button class="btn btn-primary" onclick="closeModal('pdfViewerModal');openPdfModal('${jsq(personId)}','${jsq(pol.id)}')">📷 导入/管理凭证</button>`;
+    showModal('pdfViewerModal');
+    return;
   }
+  _revokePdfBlobUrl();
   showModal('pdfViewerModal');
+  body.innerHTML = `<div style="text-align:center;padding:36px 16px"><div class="pdf-tip">⏳ 正在获取电子保单原件…</div></div>`;
+  footer.innerHTML = `<button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>`;
+  const fileName = pol.pdfName || ((pol.product || pol.type || '电子保单') + '.pdf');
+  try{
+    const raw = await fetchPolicyPdfBlob(pol);
+    const blob = new Blob([raw], {type: raw.type || 'application/pdf'});
+    _pdfBlobUrl = URL.createObjectURL(blob);
+    const vsrc = _pdfBlobUrl;
+    if(isMobileDevice()){
+      // 移动端：不用 iframe；给「打开 / 下载」按钮，由手机自带阅读器查看
+      body.innerHTML = `<div style="text-align:center;padding:24px 16px">
+        <div class="pdf-tip" style="margin-bottom:16px">📱 点下方按钮打开或下载原件，由手机自带的 PDF 阅读器查看。</div>
+        <a class="btn btn-primary" href="${vsrc}" target="_blank" rel="noopener" style="font-size:16px;padding:14px 28px;display:inline-block">📄 打开电子保单原件</a>
+        <div class="pdf-tip" style="margin-top:12px">若点开为空白，请改用下方「⬇ 下载原件」，再从手机「文件」里打开。</div>
+      </div>`;
+      footer.innerHTML = `
+        <button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>
+        <a class="btn btn-ghost" href="${vsrc}" download="${esc(fileName)}">⬇ 下载原件</a>`;
+    } else {
+      // 桌面端：iframe 内嵌查看体验更好
+      body.innerHTML = `<iframe class="pdf-frame" src="${vsrc}#toolbar=1&view=FitH" title="电子保单原件"></iframe>
+        <div class="pdf-tip">若上方未显示内容，请点下方「在新窗口打开」或「下载原件」。</div>`;
+      footer.innerHTML = `
+        <button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>
+        <a class="btn btn-ghost" href="${vsrc}" download="${esc(fileName)}">⬇ 下载原件</a>
+        <button class="btn btn-primary" onclick="openPdfNewTab('${jsq(personId)}','${jsq(pol.id)}')">🔗 在新窗口打开</button>`;
+    }
+  }catch(err){
+    body.innerHTML = `<div class="doc-note" style="margin:20px">⚠️ 无法加载电子保单原件：${esc(err && err.message ? err.message : String(err))}<br><br>若你在公开页面查看，请先在「⚙️ 设置 → ☁️ 云同步」填入令牌并同步；页面会用该令牌从你的<b>私有仓库</b>读取原件。</div>`;
+    footer.innerHTML = `<button class="btn btn-ghost" onclick="closeModal('pdfViewerModal')">关闭</button>`;
+  }
 }
 
-function openPdfNewTab(personId, policyId){
+async function openPdfNewTab(personId, policyId){
   const person = appData.people.find(p=>p.id===personId);
   const pol = person && person.policies.find(p=>p.id===policyId);
   if(!pol || !pol.pdfFile){ showToast('未找到电子保单文件'); return; }
-  let abs = pol.pdfFile;
-  try{ abs = new URL(pol.pdfFile, location.href).href; }catch(_){}
-  // 移动端：window.open + fetch blob 容易被拦截，直接跳转到 PDF 链接由浏览器原生处理
-  if(isMobileDevice()){
-    window.open(abs, '_blank');
-    return;
-  }
+  if(isMobileDevice()){ openPdfViewer(personId, policyId); return; }
   const w = window.open('', '_blank');
   if(!w){ showToast('浏览器拦截了新窗口，请允许本站弹窗后重试，或改用「下载原件」'); return; }
   try{ w.opener = null; }catch(_){}
-  fetch(pol.pdfFile).then(r=>{
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return r.blob();
-  }).then(blob=>{
-    const url = URL.createObjectURL(blob);
+  try{
+    const raw = await fetchPolicyPdfBlob(pol);
+    const url = URL.createObjectURL(new Blob([raw], {type: raw.type || 'application/pdf'}));
     w.location.href = url;
     setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_){} }, 60000);
-  }).catch(()=>{ w.location.href = abs; });
+  }catch(err){
+    try{ w.close(); }catch(_){}
+    showToast('打开失败：' + (err && err.message ? err.message : '请先配置云同步令牌'));
+  }
 }
 
 // ========== 保单档案：AI 分析 与 导入/管理 分开 ==========

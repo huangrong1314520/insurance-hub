@@ -673,6 +673,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
   </div>
 </div>
 
+<!-- ===== AI 认证分析弹窗 ===== -->
+<div class="modal-overlay" id="aiAnalysisModal" onclick="if(event.target===this)closeModal('aiAnalysisModal')">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="aiAnalysisTitle">🤖 AI 认证分析</h2>
+      <button class="modal-close" onclick="closeModal('aiAnalysisModal')">✕</button>
+    </div>
+    <div class="modal-body" id="aiAnalysisBody"></div>
+    <div class="modal-footer" id="aiAnalysisFooter"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- ===== 健康档案弹窗 ===== -->
@@ -1990,14 +2002,17 @@ function openDetail(personId, policyId){
   }
   body += `<button class="link-btn" onclick="openPdfModal('${jsq(personId)}','${jsq(pol.id)}','manage')">📥 ${pol.pdfFile?'管理文件 / 重导入':'导入电子保单 / 截图'}</button>`;
   if(pol.attachments && pol.attachments.length) body += `<span class="pdf-badge">📷 ${pol.attachments.length} 张截图</span>`;
-  body += `<button class="link-btn warn" onclick="openPdfModal('${jsq(personId)}','${jsq(pol.id)}','analyze')">🤖 ${(pol.pdfAnalysis&&pol.pdfAnalysis.fields)?'查看 / 重新AI分析':'AI 分析本保单'}</button>`;
+  const hasAi = !!(pol.pdfAnalysis && pol.pdfAnalysis.fields);
+  const aiOnclick = hasAi
+    ? "openAiAnalysisModal('" + jsq(personId) + "','" + jsq(pol.id) + "')"
+    : "openPdfModal('" + jsq(personId) + "','" + jsq(pol.id) + "','analyze')";
+  body += `<button class="link-btn warn" onclick="${aiOnclick}">🤖 ${hasAi?'查看 AI 认证分析':'AI 分析本保单'}</button>`;
   if(pol.link) body += `<a class="link-btn" href="${esc(pol.link)}" target="_blank" rel="noopener">🔗 申请/理赔入口</a>`;
   body += `</div>`;
   if(pol.attachments && pol.attachments.length){
     body += `<div class="att-grid">` + pol.attachments.map(a=>`<div class="att-item ${a.isEpolicy?'is-epolicy':''}"><img src="${esc(a.dataUrl)}" alt="${esc(a.name)}" onclick="previewImage(this.src)">${a.isEpolicy?'<span class="epolicy-tag">★ 电子保单</span>':''}</div>`).join('') + `</div>`;
   }
-  if(pol.pdfAnalysis && pol.pdfAnalysis.fields){
-    body += `<div style="margin-top:10px">${renderAIAnalysis(pol.pdfAnalysis)}</div>`;
+  if(hasAi){
     body += `<div style="margin-top:8px"><button class="link-btn" onclick="closeModal('detailModal');openPdfModal('${jsq(personId)}','${jsq(pol.id)}','analyze')">💬 针对本保单问询</button></div>`;
   }
   body += `</div>`;
@@ -3228,6 +3243,20 @@ function openPdfModal(personId, policyId, mode){
   pdfDraftText = '';
   renderPdfModal();
   showModal('pdfModal');
+}
+
+// 单独弹出「AI 认证分析」，避免保单详情卡片被长文撑得过长
+function openAiAnalysisModal(personId, policyId){
+  const person = appData.people.find(p=>p.id===personId);
+  const pol = person && person.policies.find(p=>p.id===policyId);
+  if(!pol || !(pol.pdfAnalysis && pol.pdfAnalysis.fields)){ showToast('该保单暂无 AI 分析结果'); return; }
+  const titleEl = document.getElementById('aiAnalysisTitle');
+  if(titleEl) titleEl.innerHTML = `🤖 AI 认证分析 · ${esc(pol.product || pol.type || '保单')}`;
+  document.getElementById('aiAnalysisBody').innerHTML = renderAIAnalysis(pol.pdfAnalysis);
+  document.getElementById('aiAnalysisFooter').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('aiAnalysisModal')">关闭</button>
+    <button class="btn btn-primary" onclick="closeModal('aiAnalysisModal');openPdfModal('${jsq(personId)}','${jsq(policyId)}','analyze')">🔄 重新分析 / 问询</button>`;
+  showModal('aiAnalysisModal');
 }
 
 function switchPdfTab(tab){

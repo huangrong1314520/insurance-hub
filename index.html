@@ -1372,12 +1372,18 @@ function clearSyncConfig(){
 }
 
 // 一键打开链接：把当前云同步配置（含令牌）编码进地址栏，供收藏 / 添加到手机主屏幕
-// 打开该链接时由 seedSyncConfig() 读 #sync-token= 自动预填令牌并同步，且自动从地址栏抹去
+// 打开该链接时由 seedSyncConfig() 读 #sync-token= 自动预填令牌并同步；带 keep=1 时保留地址栏
+// 不抹去令牌，这样「添加到主屏幕 / 收藏」保存下来的就是含令牌的自包含链接。
 function quickEntryUrl(){
   const cfg = syncConfig();
   if(!cfg) return null;
   const base = String(location.href).split('#')[0].split('?')[0];
-  const q = new URLSearchParams({owner:cfg.owner, repo:cfg.repo, path:cfg.path, branch:cfg.branch || 'main'});
+  const q = new URLSearchParams();
+  if(cfg.owner && cfg.owner !== DEFAULT_SYNC.owner) q.set('owner', cfg.owner);
+  if(cfg.repo && cfg.repo !== DEFAULT_SYNC.repo) q.set('repo', cfg.repo);
+  if(cfg.path && cfg.path !== DEFAULT_SYNC.path) q.set('path', cfg.path);
+  if(cfg.branch && cfg.branch !== DEFAULT_SYNC.branch) q.set('branch', cfg.branch);
+  q.set('keep', '1');
   return base + '?' + q.toString() + '#sync-token=' + encodeURIComponent(cfg.token);
 }
 async function makeQuickLink(){
@@ -1412,13 +1418,17 @@ function seedSyncConfig(){
       token = fromUrl.trim();
       owner = sp.get('owner') || owner; repo = sp.get('repo') || repo;
       path = sp.get('path') || path; branch = sp.get('branch') || branch;
-      try{
-        const clean = location.href
-          .replace(/[#&?]sync-token=[^&]*/,'')
-          .replace(/[?&]syncToken=[^&]*/,'')
-          .replace(/[?&]token=[^&]*/,'');
-        history.replaceState(null,'',clean);
-      }catch(_){}
+      // 带 keep=1 时保留地址栏令牌，使「收藏 / 添加到主屏幕」保存的是自包含链接；
+      // 否则写入后立即从地址栏抹去令牌，避免残留。
+      if(sp.get('keep') !== '1'){
+        try{
+          const clean = location.href
+            .replace(/[#&?]sync-token=[^&]*/,'')
+            .replace(/[?&]syncToken=[^&]*/,'')
+            .replace(/[?&]token=[^&]*/,'');
+          history.replaceState(null,'',clean);
+        }catch(_){}
+      }
     }
   }catch(_){}
   if(!token) return;

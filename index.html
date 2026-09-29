@@ -2039,8 +2039,8 @@ function openDetail(personId, policyId){
   if(pol.attachments && pol.attachments.length){
     body += `<div class="att-grid">` + pol.attachments.map(a=>`<div class="att-item ${a.isEpolicy?'is-epolicy':''}"><img src="${esc(a.dataUrl)}" alt="${esc(a.name)}" onclick="previewImage(this.src)">${a.isEpolicy?'<span class="epolicy-tag">★ 电子保单</span>':''}</div>`).join('') + `</div>`;
   }
-  if(hasAi){
-    body += `<div style="margin-top:8px"><button class="link-btn" onclick="closeModal('detailModal');openPdfModal('${jsq(personId)}','${jsq(pol.id)}','analyze')">💬 针对本保单问询</button></div>`;
+  if(hasAi || policyHasText(pol)){
+    body += `<div style="margin-top:8px"><button class="link-btn" onclick="closeModal('detailModal');openPdfModal('${jsq(personId)}','${jsq(pol.id)}','qa')">💬 针对本保单问询</button></div>`;
   }
   body += `</div>`;
 
@@ -3277,7 +3277,7 @@ function openPdfModal(personId, policyId, mode){
     savedAnalysis: hasAnalysis ? pol.pdfAnalysis : null,
     pendingAnalysis: null,
     policyQaLog: [],
-    tab: (mode === 'analyze' || mode === 'manage') ? mode : (hasAnalysis ? 'analyze' : 'manage')
+    tab: (mode === 'analyze' || mode === 'qa' || mode === 'manage') ? mode : (hasAnalysis ? 'analyze' : 'manage')
   };
   pdfDraftText = '';
   renderPdfModal();
@@ -3294,7 +3294,8 @@ function openAiAnalysisModal(personId, policyId){
   document.getElementById('aiAnalysisBody').innerHTML = renderAIAnalysis(pol.pdfAnalysis);
   document.getElementById('aiAnalysisFooter').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('aiAnalysisModal')">关闭</button>
-    <button class="btn btn-primary" onclick="closeModal('aiAnalysisModal');openPdfModal('${jsq(personId)}','${jsq(policyId)}','analyze')">🔄 重新分析 / 问询</button>`;
+    <button class="btn btn-primary" onclick="closeModal('aiAnalysisModal');openPdfModal('${jsq(personId)}','${jsq(policyId)}','analyze')">🔄 重新分析</button>
+    <button class="btn btn-primary" onclick="closeModal('aiAnalysisModal');openPdfModal('${jsq(personId)}','${jsq(policyId)}','qa')">💬 针对本保单问询</button>`;
   showModal('aiAnalysisModal');
 }
 
@@ -3316,7 +3317,7 @@ function renderPdfModal(){
     document.getElementById('pdfFooter').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('pdfModal')">关闭</button>`;
     return;
   }
-  const tab = pdfContext.tab === 'manage' ? 'manage' : 'analyze';
+  const tab = (pdfContext.tab === 'manage' || pdfContext.tab === 'qa') ? pdfContext.tab : 'analyze';
   const titleEl = document.getElementById('pdfModalTitle');
   if(titleEl) titleEl.innerHTML = `📄 ${esc(pol.product || pol.type || '保单档案')} · ${person.icon}${esc(person.name)}`;
 
@@ -3326,12 +3327,15 @@ function renderPdfModal(){
   </div>`;
 
   html += `<div class="pt-tabs">
-    <button class="pt-tab ${tab==='analyze'?'active':''}" onclick="switchPdfTab('analyze')">🤖 AI 分析（电子保单）</button>
-    <button class="pt-tab ${tab==='manage'?'active':''}" onclick="switchPdfTab('manage')">📥 导入 / 管理文件</button>
+    <button class="pt-tab ${tab==='analyze'?'active':''}" onclick="switchPdfTab('analyze')">🤖 AI 认证分析</button>
+    <button class="pt-tab ${tab==='qa'?'active':''}" onclick="switchPdfTab('qa')">💬 保单问询</button>
+    <button class="pt-tab ${tab==='manage'?'active':''}" onclick="switchPdfTab('manage')">📥 文件管理</button>
   </div>`;
 
   if(tab === 'analyze'){
     html += renderAnalyzeTab(pol);
+  } else if(tab === 'qa'){
+    html += renderQaTab(pol);
   } else {
     html += renderManageTab(pol);
   }
@@ -3353,6 +3357,10 @@ function renderPdfModal(){
         ${canAnalyze ? `<button class="btn btn-primary" onclick="analyzeEpolicy()">🔄 解析本保单电子保单</button>` : ''}
         <button class="btn btn-primary" onclick="switchPdfTab('manage')">📥 去导入电子保单</button>`;
     }
+  } else if(tab === 'qa'){
+    document.getElementById('pdfFooter').innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal('pdfModal')">关闭</button>
+      ${policyHasText(pol) ? '' : `<button class="btn btn-primary" onclick="switchPdfTab('manage')">📥 去导入电子保单</button>`}`;
   } else {
     document.getElementById('pdfFooter').innerHTML = `
       <button class="btn btn-ghost" onclick="closeModal('pdfModal')">关闭</button>
@@ -3384,10 +3392,14 @@ function renderAnalyzeTab(pol){
       <div class="doc-note">该保单还没有分析结果。<br>如果它本来就有电子保单原件，点下方「🔄 解析本保单电子保单」；如果只有截图/照片，请到「📥 导入 / 管理文件」里上传后识别。</div>
     </div>`;
   }
-  // 针对本保单的问询
+  return html;
+}
+
+// 针对本保单的问询（独立标签页，与 AI 认证分析分开）
+function renderQaTab(pol){
   const cidx = getClauseIndex(pol);
   const clauseN = cidx.clauses.length;
-  html += `<div class="detail-section"><h3>💬 针对本保单问询</h3>
+  return `<div class="detail-section"><h3>💬 针对本保单问询</h3>
     <div class="chat-hint">${clauseN ? `已从电子保单原文建立条款索引（共 ${clauseN} 条），回答会标注「第X条」出处；` : ''}全部在本保单电子保单内容里检索、不上传。</div>
     <div class="pq-log" id="policyQaLog">${renderPolicyQaLog()}</div>
     <div style="margin-bottom:8px">${['这份保单保什么','保额是多少','每年保费多少','什么时候到期','等待期多久','责任免除有哪些','怎么理赔']
@@ -3398,7 +3410,6 @@ function renderAnalyzeTab(pol){
     </div>
     ${policyHasText(pol) ? '' : '<div class="chat-hint" style="margin-top:6px">提示：本保单暂无电子保单文字，问询结果可能有限，可先到「导入 / 管理文件」上传电子保单或截图。</div>'}
   </div>`;
-  return html;
 }
 
 function renderManageTab(pol){

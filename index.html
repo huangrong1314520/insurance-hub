@@ -1298,11 +1298,13 @@ function renderDataInfo(){
     <div class="set-row">
       <button class="link-btn primary" onclick="saveSyncConfig()">💾 保存并同步</button>
       <button class="link-btn" onclick="syncNow()">🔄 立即同步</button>
+      <button class="link-btn" onclick="makeQuickLink()">🔗 一键打开链接</button>
       <button class="link-btn warn" onclick="clearSyncConfig()">🗑 清除配置</button>
     </div>
     <div class="btn-help">
       <b>💾 保存并同步</b>：把上面填写的账号 / 仓库 / 令牌保存到本机，并立刻同步一次；之后每次打开与修改都会自动同步。<br>
       <b>🔄 立即同步</b>：不改动配置，手动触发一次同步（云端较新就拉取，本机较新就上传）。<br>
+      <b>🔗 一键打开链接</b>：生成一条带令牌的网址（形如 …/#sync-token=…），把它「收藏」或「添加到手机主屏幕」后，以后一点开就自动带上令牌并同步，<b>无需再手动粘贴</b>。⚠️ 该链接含令牌（等于密码），请勿分享。<br>
       <b>🗑 清除配置</b>：只删除本机保存的同步配置与令牌，<b>你的数据仍完整保留在本机</b>，只是不再自动同步。
     </div>
     ${syncStatusHtml()}
@@ -1367,6 +1369,26 @@ function clearSyncConfig(){
   _settingsBuilt = false;
   showToast('已清除云同步配置');
   renderDataInfo();
+}
+
+// 一键打开链接：把当前云同步配置（含令牌）编码进地址栏，供收藏 / 添加到手机主屏幕
+// 打开该链接时由 seedSyncConfig() 读 #sync-token= 自动预填令牌并同步，且自动从地址栏抹去
+function quickEntryUrl(){
+  const cfg = syncConfig();
+  if(!cfg) return null;
+  const base = String(location.href).split('#')[0].split('?')[0];
+  const q = new URLSearchParams({owner:cfg.owner, repo:cfg.repo, path:cfg.path, branch:cfg.branch || 'main'});
+  return base + '?' + q.toString() + '#sync-token=' + encodeURIComponent(cfg.token);
+}
+async function makeQuickLink(){
+  const url = quickEntryUrl();
+  if(!url){ showToast('请先填写并保存云同步配置，再生成一键链接'); return; }
+  let copied = false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(url); copied = true; }
+  }catch(_){}
+  if(!copied){ try{ window.prompt('复制下面的一键打开链接（含令牌，请勿分享）：', url); }catch(_){} }
+  showToast(copied ? '✅ 已复制一键链接，粘贴到地址栏后收藏 / 添加到主屏幕' : '请在弹窗中手动复制链接');
 }
 
 // ========== 令牌一次性预填（安全：绝不写入仓库）==========

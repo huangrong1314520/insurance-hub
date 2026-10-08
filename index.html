@@ -326,6 +326,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .hc-abn{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.6;background:var(--fill-2);border:1px solid var(--border);border-radius:9px;padding:7px 9px}
 .hc-abn .hc-abn-item{word-break:break-all}
 .hc-abn .hc-abn-names{color:var(--text)}
+.abn-src{font-size:11.5px;color:var(--text-light);line-height:1.5;display:flex;gap:5px;align-items:flex-start}
+.abn-src .src-name{color:var(--text);font-weight:600}
+
+/* ===== 健康档案 · 异常值明细卡（数值 / 参考区间 / 来源 / 依据）===== */
+.abn-list{display:flex;flex-direction:column;gap:8px}
+.abn-card{position:relative;background:var(--card);border:1.5px solid var(--border);border-left:4px solid var(--border);border-radius:11px;padding:9px 11px;display:flex;flex-direction:column;gap:5px}
+.abn-card.flag-high{border-left-color:var(--danger)}
+.abn-card.flag-low,.abn-card.flag-watch{border-left-color:var(--warning)}
+.abn-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.abn-card-name{font-size:13px;font-weight:800;color:var(--ink)}
+.abn-card-flag{font-size:10.5px;font-weight:800;padding:1px 8px;border-radius:9px;white-space:nowrap}
+.abn-card-flag.flag-high{color:var(--danger);background:var(--danger-light)}
+.abn-card-flag.flag-low,.abn-card-flag.flag-watch{color:var(--warning);background:var(--warning-light)}
+.abn-card-flag.flag-ok{color:var(--success);background:var(--success-light)}
+.abn-card-val{display:flex;align-items:baseline;gap:5px}
+.abn-card-val b{font-size:18px;font-weight:800;color:var(--ink);line-height:1.1}
+.abn-card-unit{font-size:11.5px;color:var(--text-light)}
+.abn-card-line{display:flex;gap:6px;font-size:11.5px;line-height:1.55;color:var(--text)}
+.abn-card-line .k{flex-shrink:0;font-weight:700;color:var(--text-light);min-width:52px}
+.abn-card-line .v{flex:1;word-break:break-word}
+.abn-card-note{font-size:11px;color:var(--text-light);line-height:1.5;background:var(--fill-2);border:1px solid var(--line);border-radius:7px;padding:5px 8px}
 
 /* ===== 健康档案 · 成员汇总卡片（精简态）===== */
 .hc-sum{cursor:pointer;transition:all .13s}
@@ -5151,20 +5172,79 @@ function healthOverviewSection(person){
   const rem = healthReminderHtml(person);
   return overall + base + profile + rem;
 }
+// ========== 指标参考区间与判断依据（本地规则整理，仅供参照）==========
+const HEALTH_REF = {
+  '血压':          {range:'正常 <120/80 · 正常高值 120–139/80–89 mmHg', basis:'《中国高血压防治指南》：非同日 3 次诊室血压 ≥140/90 mmHg 可诊断高血压'},
+  '空腹血糖':      {range:'3.9–6.1 mmol/L', basis:'《中国2型糖尿病防治指南》：6.1–7.0 空腹血糖受损，≥7.0 提示糖尿病'},
+  '总胆固醇':      {range:'合适水平 <5.2 mmol/L', basis:'《中国成人血脂异常防治指南》：5.2–6.2 边缘升高，≥6.2 升高'},
+  '甘油三酯':      {range:'合适水平 <1.7 mmol/L', basis:'《中国成人血脂异常防治指南》：1.7–2.3 边缘升高，≥2.3 升高'},
+  '高密度脂蛋白':  {range:'≥1.0 mmol/L', basis:'《中国成人血脂异常防治指南》：<1.0 mmol/L 为低 HDL-C'},
+  '低密度脂蛋白':  {range:'合适水平 <3.4 mmol/L', basis:'《中国成人血脂异常防治指南》：3.4–4.1 边缘升高，≥4.1 升高'},
+  '尿酸':          {range:'男 150–416 · 女 89–357 μmol/L', basis:'临床常规参考区间；>420 μmol/L 常定义为高尿酸血症'},
+  '谷丙转氨酶':    {range:'约 0–40 U/L', basis:'临床常规参考区间，各实验室略有差异'},
+  '谷草转氨酶':    {range:'约 0–40 U/L', basis:'临床常规参考区间，各实验室略有差异'},
+  '肌酐':          {range:'男 57–97 · 女 41–73 μmol/L', basis:'临床常规参考区间，各实验室略有差异'}
+};
+const HEALTH_REF_ALIAS = {
+  'alt':'谷丙转氨酶','丙氨酸氨基转移酶':'谷丙转氨酶',
+  'ast':'谷草转氨酶','天门冬氨酸氨基转移酶':'谷草转氨酶',
+  'hdl':'高密度脂蛋白','hdl-c':'高密度脂蛋白',
+  'ldl':'低密度脂蛋白','ldl-c':'低密度脂蛋白',
+  'tc':'总胆固醇','胆固醇':'总胆固醇',
+  'tg':'甘油三酯',
+  'ua':'尿酸','血尿酸':'尿酸',
+  'glu':'空腹血糖','血糖':'空腹血糖','葡萄糖':'空腹血糖',
+  'bp':'血压',
+  'cr':'肌酐','crea':'肌酐','血肌酐':'肌酐'
+};
+function healthRefFor(name){
+  const raw = String(name||'').trim();
+  const fallback = {range:'详见报告单参考区间', basis:'以报告单标注 / 医生诊断为准'};
+  if(!raw) return fallback;
+  const key = raw.replace(/\s/g,'');
+  const norm = key.replace(/[（(].*?[)）]/g,'').toLowerCase();
+  if(HEALTH_REF_ALIAS[norm]) return HEALTH_REF[HEALTH_REF_ALIAS[norm]];
+  if(HEALTH_REF[raw]) return HEALTH_REF[raw];
+  for(const k of Object.keys(HEALTH_REF)){
+    if(key.includes(k) || k.includes(key)) return HEALTH_REF[k];
+  }
+  return fallback;
+}
+function abnormalDetailCardsHtml(rep){
+  const inds = (rep && rep.analysis && rep.analysis.indicators) || [];
+  const abns = inds.filter(i=> i.flag && i.flag !== 'ok');
+  if(!abns.length) return '';
+  const meta = {high:{label:'偏高',cls:'flag-high'}, low:{label:'偏低',cls:'flag-low'}, watch:{label:'关注',cls:'flag-watch'}};
+  return `<div class="abn-list">${abns.map(i=>{
+    const fm = meta[i.flag] || meta.watch;
+    const ref = healthRefFor(i.name);
+    return `<div class="abn-card ${fm.cls}">
+      <div class="abn-card-head"><span class="abn-card-name">${esc(i.name||'未命名指标')}</span><span class="abn-card-flag ${fm.cls}">${fm.label}</span></div>
+      <div class="abn-card-val"><b>${esc(i.value)}</b><span class="abn-card-unit">${esc(i.unit||'')}</span></div>
+      <div class="abn-card-line"><span class="k">参考区间</span><span class="v">${esc(ref.range)}</span></div>
+      <div class="abn-card-line"><span class="k">判断依据</span><span class="v">${esc(ref.basis)}</span></div>
+      ${i.note?`<div class="abn-card-note">💬 ${esc(i.note)}</div>`:''}
+    </div>`;
+  }).join('')}</div>`;
+}
 function healthAbnormalSection(person){
   const ind = healthIndicatorSummary(person);
-  if(!ind) return hcEmpty('暂无已分析的检查指标。上传体检 / 化验报告并「开始分析」后，这里会显示异常值与趋势。');
+  if(!ind) return hcEmpty('暂无已分析的检查指标。上传体检 / 化验报告并「开始分析」后，这里会列出异常值的具体数值、参考区间、来源与判断依据。');
+  const rep = ind.latest || {};
+  const abnN = ind.counts.high + ind.counts.low + ind.counts.watch;
+  const head = `<div class="hc-field k">📋 最近一次指标（${esc(rep.date||'未标日期')} · 共 ${ind.total} 项 · 异常 ${abnN} 项）</div>`;
   const pills = `<div class="hc-ind">
       <span class="ind-pill flag-ok">正常 ${ind.counts.ok}</span>
       <span class="ind-pill flag-high">偏高 ${ind.counts.high}</span>
       <span class="ind-pill flag-low">偏低 ${ind.counts.low}</span>
       <span class="ind-pill flag-watch">关注 ${ind.counts.watch}</span>
     </div>`;
-  const abn = abnormalIndicatorHtml(ind);
+  const src = `<div class="abn-src">📎 数值来源：<span class="src-name">${esc(rep.date||'未标日期')} · ${esc(rep.name||'检查记录')}${rep.place?`（${esc(rep.place)}）`:''}</span></div>`;
+  const cards = abnormalDetailCardsHtml(rep);
+  const body = cards || `<div class="hc-empty" style="border-style:solid">本份报告各项均在正常范围 🎉</div>`;
+  const hint = `<div class="chat-hint" style="margin:6px 0 0">⚠️ 参考区间与判断依据由本地规则整理（引自常见临床指南），不同医院 / 实验室区间可能不同，请以报告单及医生诊断为准。</div>`;
   const trend = renderTrendCharts(person);
-  return `<div class="hc-field k">📋 最近一次指标（${esc(ind.latest.date||'未标日期')} · 共 ${ind.total} 项）</div>${pills}
-    ${abn || `<div class="hc-empty" style="border-style:solid">本份报告各项均在正常范围 🎉</div>`}
-    ${trend ? `<div style="margin-top:8px">${trend}</div>` : hcEmpty('暂无跨报告趋势（需 2 份以上含相同指标的报告）')}`;
+  return head + pills + src + body + hint + (trend ? `<div style="margin-top:8px">${trend}</div>` : hcEmpty('暂无跨报告趋势（需 2 份以上含相同指标的报告）'));
 }
 function healthConditionsSection(person){
   const conds = (person.health||{}).conditions || [];

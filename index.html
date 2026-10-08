@@ -323,6 +323,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .hc-ind .ind-pill.flag-ok{color:var(--success);background:var(--success-light)}
 .hc-ind .ind-pill.flag-high{color:var(--danger);background:var(--danger-light)}
 .hc-ind .ind-pill.flag-low,.hc-ind .ind-pill.flag-watch{color:var(--warning);background:var(--warning-light)}
+.health-card .hc-abn{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.6;background:var(--fill-2);border:1px solid var(--border);border-radius:9px;padding:7px 9px}
+.health-card .hc-abn .hc-abn-item{word-break:break-all}
+.health-card .hc-abn .hc-abn-names{color:var(--text)}
 .health-timeline{margin-top:4px;border-left:2px dashed var(--border);padding-left:14px;display:flex;flex-direction:column;gap:10px}
 .ht-item{position:relative}
 .ht-item .ht-dot{position:absolute;left:-19px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--primary);border:2px solid var(--card)}
@@ -4798,8 +4801,24 @@ function healthIndicatorSummary(person){
   const sorted = reports.slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
   const latest = sorted[0];
   const counts = {ok:0,high:0,low:0,watch:0};
-  latest.analysis.indicators.forEach(i=>{ const f = counts[i.flag]!=null?i.flag:'watch'; counts[f]++; });
-  return {latest, counts, total: latest.analysis.indicators.length, summary: latest.analysis.summary};
+  const abn = {high:[],low:[],watch:[]};
+  latest.analysis.indicators.forEach(i=>{ const f = counts[i.flag]!=null?i.flag:'watch'; counts[f]++; if(f!=='ok') abn[f].push(i.name||'未命名指标'); });
+  return {latest, counts, abn, total: latest.analysis.indicators.length, summary: latest.analysis.summary};
+}
+function joinIndicatorNames(names, max){
+  const arr = (names||[]).filter(Boolean);
+  if(!arr.length) return '';
+  const cap = max || 6;
+  return arr.length <= cap ? arr.join('、') : arr.slice(0, cap).join('、') + ' 等 ' + arr.length + ' 项';
+}
+function abnormalIndicatorHtml(ind){
+  if(!ind || !ind.abn) return '';
+  const seg = [];
+  if(ind.abn.high.length) seg.push({cls:'flag-high', label:'偏高', names:ind.abn.high});
+  if(ind.abn.low.length) seg.push({cls:'flag-low', label:'偏低', names:ind.abn.low});
+  if(ind.abn.watch.length) seg.push({cls:'flag-watch', label:'关注', names:ind.abn.watch});
+  if(!seg.length) return '';
+  return `<div class="hc-abn">${seg.map(s=>`<div class="hc-abn-item"><span class="${s.cls}">${s.label} ${s.names.length} 项</span>：<span class="hc-abn-names">${esc(joinIndicatorNames(s.names))}</span></div>`).join('')}</div>`;
 }
 function healthTimelineHtml(person){
   const reports = (person.reports||[]).slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
@@ -4954,9 +4973,9 @@ function analyzePersonHealth(person){
   if(ind){
     highN = ind.counts.high; lowN = ind.counts.low; watchN = ind.counts.watch;
     const parts = [];
-    if(highN) parts.push('偏高 '+highN);
-    if(lowN) parts.push('偏低 '+lowN);
-    if(watchN) parts.push('关注 '+watchN);
+    if(highN) parts.push('偏高 '+highN+'（'+joinIndicatorNames(ind.abn.high)+'）');
+    if(lowN) parts.push('偏低 '+lowN+'（'+joinIndicatorNames(ind.abn.low)+'）');
+    if(watchN) parts.push('关注 '+watchN+'（'+joinIndicatorNames(ind.abn.watch)+'）');
     const detail = parts.length ? parts.join(' · ') : (ind.total+' 项均在正常范围');
     items.push({dot:'📈', text:'最近指标（'+esc(ind.latest.date||'未标日期')+'）：'+detail});
   }
@@ -5073,6 +5092,7 @@ function renderHealthPanel(){
         <span class="ind-pill flag-low">偏低 ${ind.counts.low}</span>
         <span class="ind-pill flag-watch">关注 ${ind.counts.watch}</span>
       </div>
+      ${abnormalIndicatorHtml(ind)}
       <div class="hc-field" style="color:var(--text-light)">最近检查：${esc(ind.latest.date||'未标日期')} · ${ind.total} 项</div>` : '';
     const tlHtml = healthTimelineHtml(person);
     return `<div class="health-card">

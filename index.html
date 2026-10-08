@@ -340,6 +340,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .report-thumb img{width:100%;height:100%;object-fit:cover}
 .report-item .r-name{font-size:12px;font-weight:700;line-height:1.35;word-break:break-all;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .report-item .r-meta{font-size:10.5px;color:var(--text-light);margin-top:3px}
+.report-item .r-cat{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;background:var(--primary-light);color:var(--primary-dark);margin-right:3px}
 .report-item .r-del{position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:7px;border:none;background:var(--danger);color:#fff;font-size:13px;cursor:pointer;line-height:1;display:none}
 .report-item:hover .r-del{display:block}
 .indicator-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
@@ -771,7 +772,7 @@ let currentView = localStorage.getItem('insuranceView') || 'overview';  // 当�
 let paymentYear = new Date().getFullYear();                             // 缴费视图当前选中年度
 
 // ===== 数据版本与健壮性 =====
-const DATA_VERSION = 7;
+const DATA_VERSION = 8;
 const DELETED_KEEP_DAYS = 90;   // 删除保单回收站保留天数（约 3 个月）
 const STORE_KEY = "insuranceData";
 const SYNC_KEY = "insuranceSync";
@@ -1493,6 +1494,13 @@ function migrate(){
     if(!p || typeof p !== 'object') return;
     if(!Array.isArray(p.policies)) p.policies = [];
     if(!Array.isArray(p.reports)) p.reports = [];
+    if(!p.health || typeof p.health !== 'object') p.health = {};
+    // v8：检查记录补齐「类型 / 医院」字段，老数据默认归入「其他」
+    p.reports.forEach(r=>{
+      if(!r || typeof r !== 'object') return;
+      if(!r.category) r.category = 'other';
+      if(r.place == null) r.place = '';
+    });
   });
   // v7：删除保单回收站（保留 3 个月，可恢复）
   if(!Array.isArray(appData.deletedPolicies)) appData.deletedPolicies = [];
@@ -4508,6 +4516,21 @@ function todayStr(){
 function scrollToHealth(){
   document.getElementById('healthPanel').scrollIntoView({behavior:'smooth'});
 }
+// 检查记录类型：体检 / 口腔 / 影像 / 门诊 / 化验 / 其他
+const REPORT_CATEGORIES = [
+  {id:'physical', label:'体检',      icon:'🩺'},
+  {id:'dental',   label:'口腔/看牙', icon:'🦷'},
+  {id:'imaging',  label:'影像/拍片', icon:'🩻'},
+  {id:'clinic',   label:'门诊/就诊', icon:'🏥'},
+  {id:'lab',      label:'化验/检验', icon:'🧪'},
+  {id:'other',    label:'其他',      icon:'📁'}
+];
+function reportCategoryMeta(cat){
+  return REPORT_CATEGORIES.find(c=>c.id===cat) || REPORT_CATEGORIES[REPORT_CATEGORIES.length-1];
+}
+function reportKindIcon(kind){
+  return kind==='image'?'🖼️':(kind==='pdf'?'📄':(kind==='manual'?'📝':'📁'));
+}
 // 取最新一份"已分析"报告的指标统计（用于健康卡片概览）
 function healthIndicatorSummary(person){
   const reports = (person.reports||[]).filter(r=>r.analysis && r.analysis.indicators && r.analysis.indicators.length);
@@ -4522,15 +4545,16 @@ function healthTimelineHtml(person){
   const reports = (person.reports||[]).slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
   if(!reports.length) return '';
   const items = reports.slice(0,5).map(r=>{
-    const icon = r.kind==='image'?'🖼️':(r.kind==='pdf'?'📄':'📁');
+    const cat = reportCategoryMeta(r.category||'other');
+    const icon = reportKindIcon(r.kind);
     const inds = (r.analysis&&r.analysis.indicators)||[];
     const highN = inds.filter(i=>i.flag==='high').length;
     return `<div class="ht-item">
       <div class="ht-dot"></div>
       <div class="ht-date">${esc(r.date||'未标日期')}</div>
-      <div class="ht-name">${icon} ${esc(r.name)}</div>
+      <div class="ht-name">${cat.icon} ${esc(r.name)}${r.place?` <span class="ht-note">· ${esc(r.place)}</span>`:''}</div>
       ${r.note?`<div class="ht-note">${esc(r.note)}</div>`:''}
-      ${inds.length?`<div class="ht-tags"><span class="ht-tag">共 ${inds.length} 项</span>${highN?`<span class="ht-tag flag-high">偏高 ${highN}</span>`:''}</div>`:''}
+      <div class="ht-tags"><span class="ht-tag">${cat.label}</span><span class="ht-tag">${icon}</span>${inds.length?`<span class="ht-tag">共 ${inds.length} 项</span>${highN?`<span class="ht-tag flag-high">偏高 ${highN}</span>`:''}`:''}</div>
     </div>`;
   }).join('');
   const more = reports.length>5 ? `<div class="chat-hint" style="margin-top:6px">还有 ${reports.length-5} 份较早报告，点击「编辑健康档案」查看全部</div>` : '';
@@ -4553,10 +4577,10 @@ function renderHealthPanel(){
         <span class="ind-pill flag-low">偏低 ${ind.counts.low}</span>
         <span class="ind-pill flag-watch">关注 ${ind.counts.watch}</span>
       </div>
-      <div class="hc-field" style="color:var(--text-light)">最近体检：${esc(ind.latest.date||'未标日期')} · ${ind.total} 项</div>` : '';
+      <div class="hc-field" style="color:var(--text-light)">最近检查：${esc(ind.latest.date||'未标日期')} · ${ind.total} 项</div>` : '';
     const tlHtml = healthTimelineHtml(person);
     return `<div class="health-card">
-      <div class="hc-top"><div class="hc-icon">${person.icon}</div><div><div class="hc-name">${esc(person.name)}</div><div class="hc-sub">体检报告 ${reports.length} 份${h.updatedAt?' · 更新于 '+esc(String(h.updatedAt).slice(0,10)):''}</div></div></div>
+      <div class="hc-top"><div class="hc-icon">${person.icon}</div><div><div class="hc-name">${esc(person.name)}</div><div class="hc-sub">检查记录 ${reports.length} 份${h.updatedAt?' · 更新于 '+esc(String(h.updatedAt).slice(0,10)):''}</div></div></div>
       <div class="hc-field"><span class="k">身体状态：</span><span class="v">${esc(status)}</span></div>
       <div class="hc-field"><span class="k">目前用药：</span><span class="v">${esc(meds)}</span></div>
       ${indHtml}
@@ -4564,10 +4588,10 @@ function renderHealthPanel(){
       <div class="hc-actions"><button class="link-btn primary" onclick="openHealthModal('${jsq(person.id)}')">🩺 编辑健康档案</button></div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与体检报告（可上传图片 / PDF，手机可直接拍照）</div><div class="health-grid">${cards}</div></div>`;
+  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div><div class="health-grid">${cards}</div></div>`;
 }
 function openHealthModal(personId){
-  healthContext = {personId, selectedReportId:null, pendingAnalysis:null};
+  healthContext = {personId, selectedReportId:null, pendingAnalysis:null, uploadCategory:'physical'};
   renderHealthModal();
   showModal('healthModal');
 }
@@ -4584,16 +4608,18 @@ function renderHealthModal(){
 
   let reportsHtml = '';
   if(reports.length === 0){
-    reportsHtml = `<div class="chat-hint" style="margin-top:8px">还没有体检报告，点击上方上传</div>`;
+    reportsHtml = `<div class="chat-hint" style="margin-top:8px">还没有检查记录，可在上方上传或手动录入</div>`;
   } else {
-    reportsHtml = `<div class="report-grid">` + reports.map(r=>{
+    const sorted = reports.slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
+    reportsHtml = `<div class="report-grid">` + sorted.map(r=>{
       const sel = r.id === healthContext.selectedReportId;
-      const thumb = r.kind==='image' ? `<img src="${r.dataUrl}" alt="">` : (r.kind==='pdf'?'📄':'📁');
+      const cat = reportCategoryMeta(r.category||'other');
+      const thumb = r.kind==='image' ? `<img src="${r.dataUrl}" alt="">` : reportKindIcon(r.kind);
       return `<div class="report-item ${sel?'selected':''}" onclick="healthSelectReport('${jsq(r.id)}')">
         <button class="r-del" onclick="event.stopPropagation();healthDeleteReport('${jsq(r.id)}')">✕</button>
         <div class="report-thumb">${thumb}</div>
         <div class="r-name">${esc(r.name)}</div>
-        <div class="r-meta">${esc(r.date||'')}${r.analysis&&r.analysis.indicators?' · 已分析':''}</div>
+        <div class="r-meta"><span class="r-cat">${cat.icon} ${cat.label}</span> ${esc(r.date||'')}${r.analysis&&r.analysis.indicators?' · 已分析':''}</div>
       </div>`;
     }).join('') + `</div>`;
   }
@@ -4601,18 +4627,24 @@ function renderHealthModal(){
   let detailHtml = '';
   const rep = reports.find(r=>r.id===healthContext.selectedReportId);
   if(rep){
-    const preview = rep.kind==='image' ? `<img src="${rep.dataUrl}" style="max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--border)">` : `<div class="upload-zone" style="cursor:default">${rep.kind==='pdf'?'📄':'📁'} ${esc(rep.name)}</div>`;
-    detailHtml = `<div class="detail-section" style="margin-top:14px"><h3>🔍 报告详情</h3>
+    const preview = rep.kind==='image' ? `<img src="${rep.dataUrl}" style="max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--border)">` : `<div class="upload-zone" style="cursor:default">${reportKindIcon(rep.kind)} ${esc(rep.name)}</div>`;
+    const hasFile = !!(rep.dataUrl || rep.file);
+    detailHtml = `<div class="detail-section" style="margin-top:14px"><h3>🔍 记录详情</h3>
       ${preview}
+      <div class="form-group" style="margin-top:10px"><label>名称</label><input id="r_name" value="${esc(rep.name)}" placeholder="如：2026年度体检 / 洗牙 / 胸部CT"></div>
       <div class="form-row" style="margin-top:10px">
-        <div class="form-group"><label>报告日期</label><input type="date" id="r_date" value="${esc(rep.date)}"></div>
-        <div class="form-group"><label>备注</label><input id="r_note" value="${esc(rep.note)}" placeholder="如：XX医院年度体检"></div>
+        <div class="form-group"><label>类型</label><select id="r_category">${REPORT_CATEGORIES.map(c=>`<option value="${c.id}" ${((rep.category||'other')===c.id)?'selected':''}>${c.icon} ${c.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label>医院 / 机构</label><input id="r_place" value="${esc(rep.place||'')}" placeholder="如：市人民医院"></div>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label>日期</label><input type="date" id="r_date" value="${esc(rep.date)}"></div>
+        <div class="form-group"><label>备注</label><input id="r_note" value="${esc(rep.note)}" placeholder="如：年度体检 / 复查"></div>
       </div>
       ${rep.analysis ? renderHealthAnalysis(rep.analysis) : ''}
-      <div class="form-group" style="margin-top:10px"><label>体检文字（PDF 自动提取，图片请粘贴指标数值）</label><textarea id="healthPaste" rows="4" placeholder="如：血压 130/85 mmHg，空腹血糖 5.6 mmol/L…">${esc(rep.extractedText||'')}</textarea></div>
+      <div class="form-group" style="margin-top:10px"><label>检查文字（PDF 自动提取；图片或手动录入请直接填写指标数值）</label><textarea id="healthPaste" rows="4" placeholder="如：血压 130/85 mmHg，空腹血糖 5.6 mmol/L…">${esc(rep.extractedText||'')}</textarea></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="link-btn warn" onclick="runHealthAnalysis()">🩺 开始分析</button>
-        <button class="link-btn" onclick="downloadReport('${jsq(rep.id)}')">⬇️ 下载原件</button>
+        ${hasFile?`<button class="link-btn" onclick="downloadReport('${jsq(rep.id)}')">⬇️ 下载原件</button>`:''}
       </div>
     </div>`;
   }
@@ -4620,9 +4652,11 @@ function renderHealthModal(){
   document.getElementById('healthBody').innerHTML = `
     <div class="form-group"><label>身体状态</label><textarea id="h_status" rows="3" placeholder="如：整体健康，血压略偏高，正在调整饮食">${esc(h.status||'')}</textarea></div>
     <div class="form-group"><label>目前所吃药物</label><textarea id="h_meds" rows="3" placeholder="如：氨氯地平 5mg 每日一次">${esc(h.meds||'')}</textarea></div>
-    <div class="detail-section"><h3>📎 体检报告（图片 / PDF / 文件）</h3>
-      <div class="upload-zone" onclick="document.getElementById('healthFileInput').click()"><span class="big">📤</span><strong>上传报告</strong><div class="chat-hint" style="margin:2px 0 0">支持拍照 / 相册 / PDF / 文档，本地保存</div></div>
+    <div class="detail-section"><h3>📎 检查记录（图片 / PDF / 文件 / 手动录入）</h3>
+      <div class="form-group" style="margin-bottom:8px"><label>新增记录类型</label><select id="upload_category">${REPORT_CATEGORIES.map(c=>`<option value="${c.id}" ${((healthContext.uploadCategory||'physical')===c.id)?'selected':''}>${c.icon} ${c.label}</option>`).join('')}</select></div>
+      <div class="upload-zone" onclick="document.getElementById('healthFileInput').click()"><span class="big">📤</span><strong>上传图片 / PDF</strong><div class="chat-hint" style="margin:2px 0 0">支持拍照 / 相册 / PDF / 文档，本地保存</div></div>
       <input type="file" id="healthFileInput" accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp" style="display:none" onchange="healthUploadFile(event)">
+      <button class="link-btn" style="margin-top:8px" onclick="healthAddManual()">📝 手动录入一条（不传文件）</button>
       ${reportsHtml}
       ${detailHtml}
     </div>`;
@@ -4643,6 +4677,9 @@ function saveHealth(){
   person.health.updatedAt = new Date().toISOString();
   const rep = (person.reports||[]).find(r=>r.id===healthContext.selectedReportId);
   if(rep){
+    const nm = val('r_name'); if(nm) rep.name = nm;
+    rep.category = val('r_category') || rep.category || 'other';
+    rep.place = val('r_place');
     rep.date = val('r_date') || rep.date;
     rep.note = val('r_note');
     const ta = document.getElementById('healthPaste');
@@ -4743,7 +4780,10 @@ async function healthUploadFile(event){
       dataUrl = await fileToDataURL(file);
     }
   }catch(e){ showToast('文件读取失败'); return; }
-  const rep = {id:'r-'+Date.now(), name:file.name, kind:isImg?'image':(isPdf?'pdf':'file'), dataUrl, size:file.size, date:todayStr(), note:'', extractedText:'', analysis:null, addedAt:new Date().toISOString()};
+  const catSel = document.getElementById('upload_category');
+  const category = (catSel && catSel.value) || healthContext.uploadCategory || 'physical';
+  healthContext.uploadCategory = category;
+  const rep = {id:'r-'+Date.now(), name:file.name, category, place:'', kind:isImg?'image':(isPdf?'pdf':'file'), dataUrl, size:file.size, date:todayStr(), note:'', extractedText:'', analysis:null, addedAt:new Date().toISOString()};
   if(isPdf){
     try{
       const buf = await file.arrayBuffer();
@@ -4755,6 +4795,22 @@ async function healthUploadFile(event){
   healthContext.selectedReportId = rep.id;
   renderHealthModal();
   showToast(isImg?'图片已上传':'文件已上传');
+}
+// 手动录入一条检查记录（不传文件，直接填写指标）
+function healthAddManual(){
+  const person = appData.people.find(p=>p.id===healthContext.personId);
+  if(!person) return;
+  if(!person.reports) person.reports = [];
+  const catSel = document.getElementById('upload_category');
+  const category = (catSel && catSel.value) || healthContext.uploadCategory || 'other';
+  healthContext.uploadCategory = category;
+  const cat = reportCategoryMeta(category);
+  const rep = {id:'r-'+Date.now(), name:cat.label+' · '+todayStr(), category, place:'', kind:'manual', dataUrl:'', size:0, date:todayStr(), note:'', extractedText:'', analysis:null, addedAt:new Date().toISOString()};
+  person.reports.push(rep);
+  saveData();
+  healthContext.selectedReportId = rep.id;
+  renderHealthModal();
+  showToast('已新增一条「'+cat.label+'」记录，请在下方填写指标');
 }
 function runHealthAnalysis(){
   const person = appData.people.find(p=>p.id===healthContext.personId);

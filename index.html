@@ -343,6 +343,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .report-item .r-cat{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;background:var(--primary-light);color:var(--primary-dark);margin-right:3px}
 .report-item .r-del{position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:7px;border:none;background:var(--danger);color:#fff;font-size:13px;cursor:pointer;line-height:1;display:none}
 .report-item:hover .r-del{display:block}
+.cond-list{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.cond-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--fill-2);font-size:12.5px;line-height:1.5}
+.cond-row.clickable{cursor:pointer;transition:all .13s}
+.cond-row.clickable:hover{border-color:var(--primary);background:var(--bg)}
+.cond-row.selected{border-color:var(--primary);outline:2px solid var(--primary-light)}
+.cond-row .cond-name{font-weight:700;flex:1;min-width:0;word-break:break-all}
+.cond-badge{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:9px;background:var(--fill);border:1px solid var(--border);color:var(--text-light);white-space:nowrap}
+.cond-badge.st-observing{color:var(--warning);background:var(--warning-light);border-color:var(--warning)}
+.cond-badge.st-active{color:var(--danger);background:var(--danger-light);border-color:var(--danger)}
+.cond-badge.st-improved{color:var(--success);background:var(--success-light);border-color:var(--success)}
+.cond-badge.st-resolved{color:#1d4ed8;background:var(--primary-light);border-color:var(--primary)}
+.cond-review{font-size:10.5px;font-weight:700;color:var(--text-light);white-space:nowrap}
+.cond-review.overdue{color:var(--danger)}
+.cond-review.due-soon{color:var(--warning)}
+.cond-review.ok{color:var(--success)}
+.review-banner{background:var(--warning-light);border:2px solid var(--warning);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#7a5a1f}
+.review-banner .rb-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.review-banner .rb-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.6}
+.link-btn.danger{background:var(--danger);color:#fff}
 .indicator-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
 .indicator-table th{background:var(--fill);padding:7px 10px;text-align:left;font-weight:700;color:var(--text-light);border-bottom:2px solid var(--border);font-size:11.5px}
 .indicator-table td{padding:7px 10px;border-bottom:1px solid var(--line)}
@@ -772,7 +791,7 @@ let currentView = localStorage.getItem('insuranceView') || 'overview';  // 当�
 let paymentYear = new Date().getFullYear();                             // 缴费视图当前选中年度
 
 // ===== 数据版本与健壮性 =====
-const DATA_VERSION = 8;
+const DATA_VERSION = 9;
 const DELETED_KEEP_DAYS = 90;   // 删除保单回收站保留天数（约 3 个月）
 const STORE_KEY = "insuranceData";
 const SYNC_KEY = "insuranceSync";
@@ -1500,6 +1519,20 @@ function migrate(){
       if(!r || typeof r !== 'object') return;
       if(!r.category) r.category = 'other';
       if(r.place == null) r.place = '';
+    });
+    // v9：关注项（长期跟踪）结构补齐
+    if(!Array.isArray(p.health.conditions)) p.health.conditions = [];
+    p.health.conditions.forEach(c=>{
+      if(!c || typeof c !== 'object') return;
+      if(!c.id) c.id = 'c-' + Math.random().toString(36).slice(2,9);
+      if(c.category == null) c.category = 'other';
+      if(c.status == null) c.status = 'observing';
+      if(c.foundDate == null) c.foundDate = '';
+      if(c.note == null) c.note = '';
+      if(!c.review || typeof c.review !== 'object') c.review = {};
+      if(c.review.intervalMonths == null) c.review.intervalMonths = '';
+      if(c.review.nextDate == null) c.review.nextDate = '';
+      if(c.review.lastDone == null) c.review.lastDone = '';
     });
   });
   // v7：删除保单回收站（保留 3 个月，可恢复）
@@ -4531,6 +4564,192 @@ function reportCategoryMeta(cat){
 function reportKindIcon(kind){
   return kind==='image'?'🖼️':(kind==='pdf'?'📄':(kind==='manual'?'📝':'📁'));
 }
+// 关注项（长期跟踪）：结节 / 指标异常 / 慢病 / 其他
+const CONDITION_CATEGORIES = [
+  {id:'nodule',    label:'结节/息肉', icon:'🫧'},
+  {id:'indicator', label:'指标异常',  icon:'📈'},
+  {id:'chronic',   label:'慢病',      icon:'💊'},
+  {id:'other',     label:'其他',      icon:'📌'}
+];
+const CONDITION_STATUS = [
+  {id:'observing', label:'观察中', cls:'st-observing'},
+  {id:'active',    label:'治疗中', cls:'st-active'},
+  {id:'improved',  label:'好转',   cls:'st-improved'},
+  {id:'resolved',  label:'已愈',   cls:'st-resolved'}
+];
+function conditionCategoryMeta(cat){
+  return CONDITION_CATEGORIES.find(c=>c.id===cat) || CONDITION_CATEGORIES[CONDITION_CATEGORIES.length-1];
+}
+function conditionStatusMeta(st){
+  return CONDITION_STATUS.find(s=>s.id===st) || CONDITION_STATUS[0];
+}
+function addMonthsStr(dateStr, months){
+  if(!dateStr || !months) return '';
+  const d = new Date(dateStr+'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + Number(months));
+  if(d.getDate() < day) d.setDate(0);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function daysUntil(dateStr){
+  if(!dateStr) return null;
+  const t = new Date(dateStr+'T00:00:00');
+  if(isNaN(t.getTime())) return null;
+  const now = new Date(); now.setHours(0,0,0,0);
+  return Math.round((t - now)/86400000);
+}
+function conditionNextDate(c){
+  if(!c) return '';
+  if(c.review && c.review.nextDate) return c.review.nextDate;
+  const base = (c.review && c.review.lastDone) || c.foundDate || '';
+  const iv = c.review && c.review.intervalMonths;
+  return (base && iv) ? addMonthsStr(base, iv) : '';
+}
+function reviewBadge(nextDate){
+  const dd = daysUntil(nextDate);
+  if(dd === null) return {text:'未设复查', cls:''};
+  if(dd < 0) return {text:'逾期 '+(-dd)+' 天', cls:'overdue'};
+  if(dd === 0) return {text:'今天复查', cls:'due-soon'};
+  if(dd <= 30) return {text:'还有 '+dd+' 天', cls:'due-soon'};
+  return {text:'还有 '+dd+' 天', cls:'ok'};
+}
+function renderConditionListHtml(conds, clickable){
+  if(!conds || !conds.length) return `<div class="chat-hint" style="margin:0">还没有关注项</div>`;
+  return `<div class="cond-list">` + conds.map(c=>{
+    const cat = conditionCategoryMeta(c.category);
+    const st = conditionStatusMeta(c.status);
+    const next = conditionNextDate(c);
+    const rb = reviewBadge(next);
+    const sel = clickable && c.id===healthContext.selectedConditionId;
+    return `<div class="cond-row ${clickable?'clickable':''} ${sel?'selected':''}" ${clickable?`onclick="healthSelectCondition('${jsq(c.id)}')"`:''}>
+      <span class="cond-name">${cat.icon} ${esc(c.name||'(未命名)')}</span>
+      <span class="cond-badge ${st.cls}">${st.label}</span>
+      ${next?`<span class="cond-review ${rb.cls}">复查 ${esc(next)} · ${rb.text}</span>`:`<span class="cond-review">未设复查</span>`}
+    </div>`;
+  }).join('') + `</div>`;
+}
+function renderConditionEditorHtml(c){
+  return `<div class="detail-section" style="margin-top:10px;background:var(--fill-2);border-radius:10px;padding:12px">
+    <div class="form-group"><label>关注项名称</label><input id="c_name" value="${esc(c.name||'')}" placeholder="如：甲状腺结节 / 血压偏高 / 年度体检"></div>
+    <div class="form-row" style="margin-top:10px">
+      <div class="form-group"><label>类别</label><select id="c_category">${CONDITION_CATEGORIES.map(x=>`<option value="${x.id}" ${(c.category===x.id)?'selected':''}>${x.icon} ${x.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>状态</label><select id="c_status">${CONDITION_STATUS.map(x=>`<option value="${x.id}" ${(c.status===x.id)?'selected':''}>${x.label}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row" style="margin-top:10px">
+      <div class="form-group"><label>发现日期</label><input type="date" id="c_found" value="${esc(c.foundDate||'')}"></div>
+      <div class="form-group"><label>最近复查</label><input type="date" id="c_last" value="${esc((c.review&&c.review.lastDone)||'')}"></div>
+    </div>
+    <div class="form-row" style="margin-top:10px">
+      <div class="form-group"><label>复查周期（月）</label><input type="number" min="1" id="c_interval" value="${esc((c.review&&c.review.intervalMonths)||'')}" placeholder="如 6"></div>
+      <div class="form-group"><label>下次复查</label><input type="date" id="c_next" value="${esc((c.review&&c.review.nextDate)||'')}"></div>
+    </div>
+    <div class="chat-hint" style="margin:0 0 8px">留空「下次复查」时，将按「最近复查 / 发现日期 + 复查周期」自动推算。</div>
+    <div class="form-group"><label>备注</label><input id="c_note" value="${esc(c.note||'')}" placeholder="如：TI-RADS 3类，半年复查B超"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="link-btn primary" onclick="healthSaveCondition()">💾 保存此关注项</button>
+      <button class="link-btn" onclick="healthMarkReviewed()">✅ 标记已复查（今天）</button>
+      <button class="link-btn danger" onclick="healthDeleteCondition()">🗑️ 删除</button>
+    </div>
+  </div>`;
+}
+function collectHealthReminders(people){
+  const out = [];
+  (people||[]).forEach(person=>{
+    const conds = (person.health && person.health.conditions) || [];
+    conds.forEach(c=>{
+      if(c.status==='resolved') return;
+      const next = conditionNextDate(c);
+      const dd = daysUntil(next);
+      if(dd === null) return;
+      if(dd <= 30) out.push({personName:person.name, icon:person.icon, personId:person.id, cond:c, next, dd});
+    });
+  });
+  out.sort((a,b)=> a.dd - b.dd);
+  return out;
+}
+function renderReviewBanner(people){
+  const rs = collectHealthReminders(people);
+  if(!rs.length) return '';
+  const items = rs.map(r=>{
+    const cat = conditionCategoryMeta(r.cond.category);
+    const overdue = r.dd < 0;
+    const label = overdue ? ('⚠️ 已逾期 '+(-r.dd)+' 天') : (r.dd===0 ? '⏰ 今天复查' : ('⏰ 还有 '+r.dd+' 天'));
+    return `<div class="rb-item"><span>${cat.icon}</span><strong>${esc(r.personName)}</strong> · ${esc(r.cond.name||'')} <span class="cond-review ${overdue?'overdue':'due-soon'}">复查 ${esc(r.next)} · ${label}</span></div>`;
+  }).join('');
+  return `<div class="review-banner">⏰ <strong>复查提醒</strong><div class="rb-list">${items}</div></div>`;
+}
+function healthSelectCondition(id){
+  healthContext.selectedConditionId = id;
+  renderHealthModal();
+}
+function healthAddCondition(){
+  healthContext.selectedConditionId = '__new__';
+  renderHealthModal();
+}
+function applyConditionForm(person){
+  if(!person || !document.getElementById('c_name')) return null;
+  const nm = val('c_name');
+  if(!nm) return null;
+  if(!person.health) person.health = {};
+  if(!Array.isArray(person.health.conditions)) person.health.conditions = [];
+  const conds = person.health.conditions;
+  const selId = healthContext.selectedConditionId;
+  let c = (selId && selId!=='__new__') ? conds.find(x=>x.id===selId) : null;
+  if(!c){ c = {id:'c-'+Math.random().toString(36).slice(2,9)}; conds.push(c); }
+  c.name = nm;
+  c.category = val('c_category') || 'other';
+  c.status = val('c_status') || 'observing';
+  c.foundDate = val('c_found');
+  c.note = val('c_note');
+  c.review = c.review || {};
+  c.review.intervalMonths = val('c_interval');
+  c.review.nextDate = val('c_next');
+  c.review.lastDone = val('c_last');
+  healthContext.selectedConditionId = c.id;
+  return c;
+}
+function healthSaveCondition(){
+  const person = appData.people.find(p=>p.id===healthContext.personId);
+  if(!person) return;
+  if(!val('c_name')){ showToast('请填写关注项名称'); return; }
+  applyConditionForm(person);
+  person.health.updatedAt = new Date().toISOString();
+  saveData();
+  renderHealthModal();
+  renderHealthPanel();
+  showToast('已保存关注项');
+}
+function healthMarkReviewed(){
+  const person = appData.people.find(p=>p.id===healthContext.personId);
+  if(!person) return;
+  const conds = (person.health && person.health.conditions) || [];
+  const c = conds.find(x=>x.id===healthContext.selectedConditionId);
+  if(!c){ showToast('请先保存关注项'); return; }
+  const today = todayStr();
+  c.review = c.review || {};
+  c.review.lastDone = today;
+  const iv = val('c_interval') || c.review.intervalMonths;
+  c.review.intervalMonths = iv || '';
+  c.review.nextDate = iv ? addMonthsStr(today, iv) : '';
+  person.health.updatedAt = new Date().toISOString();
+  saveData();
+  renderHealthModal();
+  renderHealthPanel();
+  showToast('已记录本次复查');
+}
+function healthDeleteCondition(){
+  const person = appData.people.find(p=>p.id===healthContext.personId);
+  if(!person) return;
+  if(!confirm('删除这个关注项吗？')) return;
+  person.health.conditions = ((person.health && person.health.conditions)||[]).filter(c=>c.id!==healthContext.selectedConditionId);
+  healthContext.selectedConditionId = null;
+  person.health.updatedAt = new Date().toISOString();
+  saveData();
+  renderHealthModal();
+  renderHealthPanel();
+  showToast('已删除关注项');
+}
 // 取最新一份"已分析"报告的指标统计（用于健康卡片概览）
 function healthIndicatorSummary(person){
   const reports = (person.reports||[]).filter(r=>r.analysis && r.analysis.indicators && r.analysis.indicators.length);
@@ -4565,11 +4784,14 @@ function renderHealthPanel(){
   if(!el) return;
   const people = currentPerson==='all' ? appData.people : appData.people.filter(p=>p.id===currentPerson);
   if(people.length === 0){ el.innerHTML=''; return; }
+  const banner = renderReviewBanner(people);
   const cards = people.map(person=>{
     const h = person.health || {};
     const reports = person.reports || [];
     const status = h.status ? h.status : '未填写';
     const meds = h.meds ? h.meds : '未填写';
+    const conds = h.conditions || [];
+    const condHtml = conds.length ? `<div class="hc-field k" style="margin-top:2px">🫧 关注项（${conds.length}）</div>${renderConditionListHtml(conds, false)}` : '';
     const ind = healthIndicatorSummary(person);
     const indHtml = ind ? `<div class="hc-ind">
         <span class="ind-pill flag-ok">正常 ${ind.counts.ok}</span>
@@ -4584,11 +4806,12 @@ function renderHealthPanel(){
       <div class="hc-field"><span class="k">身体状态：</span><span class="v">${esc(status)}</span></div>
       <div class="hc-field"><span class="k">目前用药：</span><span class="v">${esc(meds)}</span></div>
       ${indHtml}
+      ${condHtml}
       ${tlHtml ? `<div class="hc-field k" style="margin-top:2px">📅 报告时间轴</div>${tlHtml}` : ''}
       <div class="hc-actions"><button class="link-btn primary" onclick="openHealthModal('${jsq(person.id)}')">🩺 编辑健康档案</button></div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div><div class="health-grid">${cards}</div></div>`;
+  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div>${banner}<div class="health-grid">${cards}</div></div>`;
 }
 function openHealthModal(personId){
   healthContext = {personId, selectedReportId:null, pendingAnalysis:null, uploadCategory:'physical'};
@@ -4649,9 +4872,23 @@ function renderHealthModal(){
     </div>`;
   }
 
+  const conds = h.conditions || [];
+  const selCondId = healthContext.selectedConditionId;
+  const selCond = (selCondId && selCondId!=='__new__') ? conds.find(c=>c.id===selCondId) : null;
+  let condEditorHtml = '';
+  if(selCondId === '__new__' || selCond){
+    const editing = selCond || {name:'', category:'nodule', status:'observing', foundDate: todayStr(), note:'', review:{}};
+    condEditorHtml = renderConditionEditorHtml(editing);
+  }
   document.getElementById('healthBody').innerHTML = `
     <div class="form-group"><label>身体状态</label><textarea id="h_status" rows="3" placeholder="如：整体健康，血压略偏高，正在调整饮食">${esc(h.status||'')}</textarea></div>
     <div class="form-group"><label>目前所吃药物</label><textarea id="h_meds" rows="3" placeholder="如：氨氯地平 5mg 每日一次">${esc(h.meds||'')}</textarea></div>
+    <div class="detail-section"><h3>🫧 关注项（长期跟踪）</h3>
+      <div class="chat-hint" style="margin:0 0 4px">记录结节 / 指标异常 / 慢病等需长期跟踪的问题，可设置复查周期并自动提醒。</div>
+      ${renderConditionListHtml(conds, true)}
+      <button class="link-btn" style="margin-top:8px" onclick="healthAddCondition()">📝 新增关注项</button>
+      ${condEditorHtml}
+    </div>
     <div class="detail-section"><h3>📎 检查记录（图片 / PDF / 文件 / 手动录入）</h3>
       <div class="form-group" style="margin-bottom:8px"><label>新增记录类型</label><select id="upload_category">${REPORT_CATEGORIES.map(c=>`<option value="${c.id}" ${((healthContext.uploadCategory||'physical')===c.id)?'selected':''}>${c.icon} ${c.label}</option>`).join('')}</select></div>
       <div class="upload-zone" onclick="document.getElementById('healthFileInput').click()"><span class="big">📤</span><strong>上传图片 / PDF</strong><div class="chat-hint" style="margin:2px 0 0">支持拍照 / 相册 / PDF / 文档，本地保存</div></div>
@@ -4685,6 +4922,7 @@ function saveHealth(){
     const ta = document.getElementById('healthPaste');
     if(ta) rep.extractedText = ta.value.trim();
   }
+  applyConditionForm(person);
   saveData();
   closeModal('healthModal');
   renderHealthPanel();

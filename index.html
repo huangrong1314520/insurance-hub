@@ -314,18 +314,36 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .health-card .hc-icon{width:42px;height:42px;border-radius:11px;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
 .health-card .hc-name{font-weight:800;font-size:15px}
 .health-card .hc-sub{font-size:12px;color:var(--text-light)}
-.health-card .hc-field{font-size:12.5px;line-height:1.6}
-.health-card .hc-field .k{font-weight:700;color:var(--text-light)}
-.health-card .hc-field .v{white-space:pre-wrap}
+.hc-field{font-size:12.5px;line-height:1.6}
+.hc-field .k{font-weight:700;color:var(--text-light)}
+.hc-field .v{white-space:pre-wrap}
 .health-card .hc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
-.health-card .hc-ind{display:flex;flex-wrap:wrap;gap:6px}
+.hc-ind{display:flex;flex-wrap:wrap;gap:6px}
 .hc-ind .ind-pill{font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;background:var(--fill);border:1px solid var(--border)}
 .hc-ind .ind-pill.flag-ok{color:var(--success);background:var(--success-light)}
 .hc-ind .ind-pill.flag-high{color:var(--danger);background:var(--danger-light)}
 .hc-ind .ind-pill.flag-low,.hc-ind .ind-pill.flag-watch{color:var(--warning);background:var(--warning-light)}
-.health-card .hc-abn{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.6;background:var(--fill-2);border:1px solid var(--border);border-radius:9px;padding:7px 9px}
-.health-card .hc-abn .hc-abn-item{word-break:break-all}
-.health-card .hc-abn .hc-abn-names{color:var(--text)}
+.hc-abn{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.6;background:var(--fill-2);border:1px solid var(--border);border-radius:9px;padding:7px 9px}
+.hc-abn .hc-abn-item{word-break:break-all}
+.hc-abn .hc-abn-names{color:var(--text)}
+
+/* ===== 健康档案 · 成员汇总卡片（精简态）===== */
+.hc-sum{cursor:pointer;transition:all .13s}
+.hc-sum:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 rgba(41,36,28,.18)}
+.hc-sum .hc-actions{align-items:center;justify-content:space-between}
+.hc-brief{font-size:12.5px;line-height:1.6;color:var(--text);background:var(--fill-2);border:1px solid var(--border);border-radius:9px;padding:8px 10px}
+.hc-rem{display:flex;flex-wrap:wrap;gap:6px}
+.hc-more{font-size:12.5px;font-weight:800;color:var(--primary-dark)}
+.hc-empty{font-size:12.5px;color:var(--text-light);line-height:1.7;border:1.5px dashed var(--border);border-radius:10px;padding:14px;text-align:center;background:var(--fill-2)}
+
+/* ===== 健康档案 · 分类详情（下钻态）===== */
+.health-detail{display:flex;flex-direction:column;gap:12px}
+.hd-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hd-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hd-icon{width:36px;height:36px;border-radius:10px;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.hd-name{font-size:16px;font-weight:800}
+.hd-tabs{margin-bottom:0}
+.hd-body{display:flex;flex-direction:column;gap:10px;border-top:2px dashed var(--border);padding-top:14px}
 .health-timeline{margin-top:4px;border-left:2px dashed var(--border);padding-left:14px;display:flex;flex-direction:column;gap:10px}
 .ht-item{position:relative}
 .ht-item .ht-dot{position:absolute;left:-19px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--primary);border:2px solid var(--card)}
@@ -830,6 +848,7 @@ let pdfDraftText = "";
 // 添加保单时上传的电子保单/截图暂存区（尚未落库）
 let addDoc = { fileName:null, draftText:'', attachments:[], analysis:null };
 let healthContext = {personId:null, selectedReportId:null, pendingAnalysis:null};
+let healthDetail = null;  // 个人健康详情：{personId, tab}，null 时显示成员汇总卡片
 let paymentContext = {personId:null, policyId:null, editingId:null};
 let currentView = localStorage.getItem('insuranceView') || 'overview';  // 当前视图（六分区）
 let paymentYear = new Date().getFullYear();                             // 缴费视图当前选中年度
@@ -1805,6 +1824,7 @@ function renderTabs(){
 
 function switchPerson(id){
   currentPerson = id;
+  healthDetail = null;
   renderTabs();
   renderAll();
 }
@@ -4820,10 +4840,12 @@ function abnormalIndicatorHtml(ind){
   if(!seg.length) return '';
   return `<div class="hc-abn">${seg.map(s=>`<div class="hc-abn-item"><span class="${s.cls}">${s.label} ${s.names.length} 项</span>：<span class="hc-abn-names">${esc(joinIndicatorNames(s.names))}</span></div>`).join('')}</div>`;
 }
-function healthTimelineHtml(person){
+function healthTimelineHtml(person, limit){
   const reports = (person.reports||[]).slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
   if(!reports.length) return '';
-  const items = reports.slice(0,5).map(r=>{
+  const cap = (limit==null) ? 5 : limit;
+  const shown = cap > 0 ? reports.slice(0,cap) : reports;
+  const items = shown.map(r=>{
     const cat = reportCategoryMeta(r.category||'other');
     const icon = reportKindIcon(r.kind);
     const inds = (r.analysis&&r.analysis.indicators)||[];
@@ -4836,7 +4858,7 @@ function healthTimelineHtml(person){
       <div class="ht-tags"><span class="ht-tag">${cat.label}</span><span class="ht-tag">${icon}</span>${inds.length?`<span class="ht-tag">共 ${inds.length} 项</span>${highN?`<span class="ht-tag flag-high">偏高 ${highN}</span>`:''}`:''}</div>
     </div>`;
   }).join('');
-  const more = reports.length>5 ? `<div class="chat-hint" style="margin-top:6px">还有 ${reports.length-5} 份较早报告，点击「编辑健康档案」查看全部</div>` : '';
+  const more = (cap > 0 && reports.length > cap) ? `<div class="chat-hint" style="margin-top:6px">还有 ${reports.length-cap} 份较早报告，点击「编辑健康档案」查看全部</div>` : '';
   return `<div class="health-timeline">${items}</div>${more}`;
 }
 // ========== 指标趋势（跨报告折线图）==========
@@ -5068,47 +5090,191 @@ function renderFamilyHealthOverview(people){
     <div class="fh-grid">${cells}</div>
   </div>`;
 }
+// ========== 健康档案分类详情（成员卡片 → 分类板块）==========
+const HEALTH_SECTIONS = [
+  {id:'overview',   label:'总览分析', icon:'📊'},
+  {id:'abnormal',   label:'异常值',   icon:'📈'},
+  {id:'conditions', label:'关注项',   icon:'🫧'},
+  {id:'reports',    label:'资料',     icon:'📎'},
+  {id:'timeline',   label:'时间轴',   icon:'📅'}
+];
+function healthSectionCount(person, sid){
+  const h = person.health || {};
+  if(sid === 'abnormal'){ const ind = healthIndicatorSummary(person); return ind ? (ind.counts.high + ind.counts.low + ind.counts.watch) : 0; }
+  if(sid === 'conditions') return (h.conditions||[]).filter(c=>c.status!=='resolved').length;
+  if(sid === 'reports' || sid === 'timeline') return (person.reports||[]).length;
+  return 0;
+}
+function scrollHealthTop(){
+  const el = document.getElementById('healthPanel');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function openHealthDetail(id, tab){
+  healthDetail = {personId:id, tab: tab || 'overview'};
+  renderHealthPanel();
+  scrollHealthTop();
+}
+function setHealthTab(tab){
+  if(!healthDetail) return;
+  healthDetail.tab = tab;
+  renderHealthPanel();
+  scrollHealthTop();
+}
+function closeHealthDetail(){
+  healthDetail = null;
+  renderHealthPanel();
+  scrollHealthTop();
+}
+function hcEmpty(text){
+  return `<div class="hc-empty">${esc(text)}</div>`;
+}
+function healthReminderHtml(person){
+  const rs = collectHealthReminders([person]);
+  if(!rs.length) return '';
+  const items = rs.map(r=>{
+    const cat = conditionCategoryMeta(r.cond.category);
+    const overdue = r.dd < 0;
+    const txt = overdue ? ('已逾期 '+(-r.dd)+' 天') : (r.dd===0 ? '今天复查' : ('还有 '+r.dd+' 天'));
+    return `<div class="cond-row"><span class="cond-name">${cat.icon} ${esc(r.cond.name||'')}</span><span class="cond-review ${overdue?'overdue':'due-soon'}">复查 ${esc(r.next)} · ${txt}</span></div>`;
+  }).join('');
+  return `<div class="hc-field k">⏰ 复查提醒</div><div class="cond-list">${items}</div>`;
+}
+function healthOverviewSection(person){
+  const h = person.health || {};
+  const a = analyzePersonHealth(person);
+  const overall = a
+    ? renderOverallAnalysis(person)
+    : `<div class="hc-field k">📊 整体分析</div><div class="overall-box"><div class="chat-hint" style="margin:0">信息较少，暂无法生成整体分析。完善个人画像或上传检查记录后会自动生成。</div></div>`;
+  const base = `<div class="hc-field"><span class="k">身体状态：</span><span class="v">${esc(h.status||'未填写')}</span></div>
+    <div class="hc-field"><span class="k">目前用药：</span><span class="v">${esc(h.meds||'未填写')}</span></div>`;
+  const profile = renderPersonProfile(person) || `<div class="hc-field k">🧬 个人画像</div>${hcEmpty('尚未填写个人画像，点右上角「编辑」补充年龄 / 血型 / 过敏史等')}`;
+  const rem = healthReminderHtml(person);
+  return overall + base + profile + rem;
+}
+function healthAbnormalSection(person){
+  const ind = healthIndicatorSummary(person);
+  if(!ind) return hcEmpty('暂无已分析的检查指标。上传体检 / 化验报告并「开始分析」后，这里会显示异常值与趋势。');
+  const pills = `<div class="hc-ind">
+      <span class="ind-pill flag-ok">正常 ${ind.counts.ok}</span>
+      <span class="ind-pill flag-high">偏高 ${ind.counts.high}</span>
+      <span class="ind-pill flag-low">偏低 ${ind.counts.low}</span>
+      <span class="ind-pill flag-watch">关注 ${ind.counts.watch}</span>
+    </div>`;
+  const abn = abnormalIndicatorHtml(ind);
+  const trend = renderTrendCharts(person);
+  return `<div class="hc-field k">📋 最近一次指标（${esc(ind.latest.date||'未标日期')} · 共 ${ind.total} 项）</div>${pills}
+    ${abn || `<div class="hc-empty" style="border-style:solid">本份报告各项均在正常范围 🎉</div>`}
+    ${trend ? `<div style="margin-top:8px">${trend}</div>` : hcEmpty('暂无跨报告趋势（需 2 份以上含相同指标的报告）')}`;
+}
+function healthConditionsSection(person){
+  const conds = (person.health||{}).conditions || [];
+  const rem = healthReminderHtml(person);
+  const list = conds.length ? renderConditionListHtml(conds, false) : hcEmpty('还没有关注项。点右上角「编辑」添加结节 / 指标异常 / 慢病等长期跟踪项。');
+  return (rem ? rem + `<div style="height:2px"></div>` : '') + `<div class="hc-field k">🫧 关注项（${conds.length}）</div>${list}`;
+}
+function reportTileHtml(person, rep){
+  const cat = reportCategoryMeta(rep.category||'other');
+  const thumb = (rep.kind==='image' && rep.dataUrl) ? `<img src="${rep.dataUrl}" alt="">` : reportKindIcon(rep.kind);
+  const inds = (rep.analysis && rep.analysis.indicators) || [];
+  const abnN = inds.filter(i=>i.flag && i.flag!=='ok').length;
+  let sub = '';
+  if(inds.length) sub = abnN ? `<span class="flag-high">异常 ${abnN}</span> · 共 ${inds.length} 项` : `<span class="flag-ok">均正常</span> · 共 ${inds.length} 项`;
+  else if(rep.kind === 'manual') sub = '手动录入';
+  return `<div class="report-item" onclick="healthOpenReport('${jsq(person.id)}','${jsq(rep.id)}')">
+    <div class="report-thumb">${thumb}</div>
+    <div class="r-name">${esc(rep.name)}</div>
+    <div class="r-meta"><span class="r-cat">${cat.icon} ${cat.label}</span> ${esc(rep.date||'未标日期')}</div>
+    ${sub?`<div class="r-meta">${sub}</div>`:''}
+  </div>`;
+}
+function renderReportsSection(person){
+  const reports = (person.reports||[]).slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
+  if(!reports.length) return hcEmpty('还没有上传资料。点右上角「编辑」上传体检 / 拍片 / 化验单等图片或 PDF。');
+  const groups = {};
+  reports.forEach(r=>{ const c = r.category || 'other'; (groups[c] = groups[c] || []).push(r); });
+  return REPORT_CATEGORIES.map(c=>c.id).filter(id=>groups[id]).map(id=>{
+    const meta = reportCategoryMeta(id);
+    return `<div class="hc-field k" style="margin-top:8px">${meta.icon} ${meta.label}（${groups[id].length}）</div><div class="report-grid">${groups[id].map(r=>reportTileHtml(person, r)).join('')}</div>`;
+  }).join('');
+}
+function healthTimelineSection(person){
+  const reports = person.reports || [];
+  if(!reports.length) return hcEmpty('还没有检查记录。上传或手动录入后，这里会按时间排列全部记录。');
+  return `<div class="hc-field k">📅 报告时间轴（${reports.length} 份）</div>${healthTimelineHtml(person, 0)}`;
+}
+function renderHealthSection(person, sid){
+  if(sid === 'abnormal')   return healthAbnormalSection(person);
+  if(sid === 'conditions') return healthConditionsSection(person);
+  if(sid === 'reports')    return renderReportsSection(person);
+  if(sid === 'timeline')   return healthTimelineSection(person);
+  return healthOverviewSection(person);
+}
+function healthSummaryCardHtml(person){
+  const reports = person.reports || [];
+  const a = analyzePersonHealth(person);
+  const level = a ? a.level : 'none';
+  const levelLabel = a ? a.levelLabel : '未建档';
+  const ind = healthIndicatorSummary(person);
+  const abnN = ind ? (ind.counts.high + ind.counts.low + ind.counts.watch) : 0;
+  const reminders = collectHealthReminders([person]);
+  const overdue = reminders.filter(r=>r.dd < 0).length;
+  const soon = reminders.filter(r=>r.dd >= 0).length;
+  let rem = '';
+  if(overdue) rem = `<span class="cond-review overdue">复查逾期 ${overdue} 项</span>`;
+  else if(soon) rem = `<span class="cond-review due-soon">${soon} 项待复查</span>`;
+  return `<div class="health-card hc-sum lv-${level}" onclick="openHealthDetail('${jsq(person.id)}')" title="查看 ${esc(person.name)} 的健康档案详情">
+    <div class="hc-top">
+      <div class="hc-icon">${person.icon}</div>
+      <div style="flex:1;min-width:0"><div class="hc-name">${esc(person.name)}</div><div class="hc-sub">检查记录 ${reports.length} 份</div></div>
+      <span class="overall-level ${level==='none'?'watch':level}">${esc(levelLabel)}</span>
+    </div>
+    <div class="hc-brief">${esc(familyHealthBrief(person))}</div>
+    ${abnN ? abnormalIndicatorHtml(ind) : ''}
+    ${rem ? `<div class="hc-rem">${rem}</div>` : ''}
+    <div class="hc-actions">
+      <span class="hc-more">查看详情 →</span>
+      <button class="link-btn" onclick="event.stopPropagation();openHealthModal('${jsq(person.id)}')">🩺 编辑</button>
+    </div>
+  </div>`;
+}
+function renderHealthDetail(person){
+  const a = analyzePersonHealth(person);
+  const level = a ? a.level : 'none';
+  const levelLabel = a ? a.levelLabel : '未建档';
+  const active = (healthDetail && healthDetail.tab) || 'overview';
+  const tabs = HEALTH_SECTIONS.map(s=>{
+    const n = healthSectionCount(person, s.id);
+    return `<button class="tab ${active===s.id?'active':''}" onclick="setHealthTab('${s.id}')">${s.icon} ${s.label}${n?`<span class="badge">${n}</span>`:''}</button>`;
+  }).join('');
+  return `<div class="health-detail">
+    <div class="hd-head">
+      <button class="link-btn" onclick="closeHealthDetail()">← 返回</button>
+      <div class="hd-title"><span class="hd-icon">${person.icon}</span><span class="hd-name">${esc(person.name)}</span><span class="overall-level ${level==='none'?'watch':level}">${esc(levelLabel)}</span></div>
+      <button class="link-btn primary" onclick="openHealthModal('${jsq(person.id)}')">🩺 编辑</button>
+    </div>
+    <div class="tabs hd-tabs">${tabs}</div>
+    <div class="hd-body">${renderHealthSection(person, active)}</div>
+  </div>`;
+}
+function healthOpenReport(personId, reportId){
+  healthContext = {personId, selectedReportId:reportId, pendingAnalysis:null, uploadCategory:'physical'};
+  renderHealthModal();
+  showModal('healthModal');
+}
 function renderHealthPanel(){
   const el = document.getElementById('healthPanel');
   if(!el) return;
   const people = currentPerson==='all' ? appData.people : appData.people.filter(p=>p.id===currentPerson);
   if(people.length === 0){ el.innerHTML=''; return; }
+  if(healthDetail){
+    const person = appData.people.find(p=>p.id===healthDetail.personId);
+    if(person){ el.innerHTML = `<div class="health-panel">${renderHealthDetail(person)}</div>`; return; }
+    healthDetail = null;
+  }
   const banner = renderReviewBanner(people);
   const famHtml = currentPerson === 'all' ? renderFamilyHealthOverview(appData.people) : '';
-  const cards = people.map(person=>{
-    const h = person.health || {};
-    const reports = person.reports || [];
-    const status = h.status ? h.status : '未填写';
-    const meds = h.meds ? h.meds : '未填写';
-    const conds = h.conditions || [];
-    const condHtml = conds.length ? `<div class="hc-field k" style="margin-top:2px">🫧 关注项（${conds.length}）</div>${renderConditionListHtml(conds, false)}` : '';
-    const trendHtml = renderTrendCharts(person);
-    const profileHtml = renderPersonProfile(person);
-    const overallHtml = renderOverallAnalysis(person);
-    const ind = healthIndicatorSummary(person);
-    const indHtml = ind ? `<div class="hc-ind">
-        <span class="ind-pill flag-ok">正常 ${ind.counts.ok}</span>
-        <span class="ind-pill flag-high">偏高 ${ind.counts.high}</span>
-        <span class="ind-pill flag-low">偏低 ${ind.counts.low}</span>
-        <span class="ind-pill flag-watch">关注 ${ind.counts.watch}</span>
-      </div>
-      ${abnormalIndicatorHtml(ind)}
-      <div class="hc-field" style="color:var(--text-light)">最近检查：${esc(ind.latest.date||'未标日期')} · ${ind.total} 项</div>` : '';
-    const tlHtml = healthTimelineHtml(person);
-    return `<div class="health-card">
-      <div class="hc-top"><div class="hc-icon">${person.icon}</div><div><div class="hc-name">${esc(person.name)}</div><div class="hc-sub">检查记录 ${reports.length} 份${h.updatedAt?' · 更新于 '+esc(String(h.updatedAt).slice(0,10)):''}</div></div></div>
-      <div class="hc-field"><span class="k">身体状态：</span><span class="v">${esc(status)}</span></div>
-      <div class="hc-field"><span class="k">目前用药：</span><span class="v">${esc(meds)}</span></div>
-      ${profileHtml}
-      ${overallHtml}
-      ${indHtml}
-      ${condHtml}
-      ${trendHtml}
-      ${tlHtml ? `<div class="hc-field k" style="margin-top:2px">📅 报告时间轴</div>${tlHtml}` : ''}
-      <div class="hc-actions"><button class="link-btn primary" onclick="openHealthModal('${jsq(person.id)}')">🩺 编辑健康档案</button></div>
-    </div>`;
-  }).join('');
-  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div>${famHtml}${banner}<div class="health-grid">${cards}</div></div>`;
+  const cards = people.map(person=>healthSummaryCardHtml(person)).join('');
+  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">点击成员卡片进入分类详情（总览分析 / 异常值 / 关注项 / 资料 / 时间轴），或点「编辑」录入</div>${famHtml}${banner}<div class="health-grid">${cards}</div></div>`;
 }
 function openHealthModal(personId){
   healthContext = {personId, selectedReportId:null, pendingAnalysis:null, uploadCategory:'physical'};

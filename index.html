@@ -381,6 +381,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .overall-list li{font-size:12px;line-height:1.55;display:flex;gap:7px;align-items:flex-start}
 .overall-dot{flex:0 0 auto;font-size:11px;line-height:1.5;color:var(--text-light)}
 .overall-tip{margin-top:8px;font-size:12px;color:var(--text-light);line-height:1.7;border-top:1px dashed var(--border);padding-top:8px}
+.fh-overview{border:2px solid var(--ink);border-radius:12px;background:var(--fill-2);padding:12px 14px;margin-bottom:14px}
+.fh-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;font-weight:800}
+.fh-sum-wrap{display:flex;gap:8px;flex-wrap:wrap}
+.fh-sum{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--fill);border:1px solid var(--border);color:var(--text-light)}
+.fh-sum b{font-size:12.5px}
+.fh-sum.lv-high{color:var(--danger);background:var(--danger-light);border-color:var(--danger)}
+.fh-sum.lv-watch{color:var(--warning);background:var(--warning-light);border-color:var(--warning)}
+.fh-sum.lv-ok{color:var(--success);background:var(--success-light);border-color:var(--success)}
+.fh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px}
+.fh-item{display:flex;align-items:center;gap:9px;border:1.5px solid var(--border);border-radius:10px;background:var(--card);padding:9px 11px;cursor:pointer;transition:all .13s}
+.fh-item:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 rgba(41,36,28,.12)}
+.fh-item.lv-high{border-color:var(--danger)}
+.fh-item.lv-watch{border-color:var(--warning)}
+.fh-light{font-size:13px;line-height:1;flex-shrink:0}
+.fh-emoji{font-size:20px;flex-shrink:0}
+.fh-main{min-width:0;flex:1}
+.fh-name{font-size:13px;font-weight:800;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fh-badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--fill);border:1px solid var(--border);color:var(--text-light);white-space:nowrap}
+.fh-badge.lv-high{color:var(--danger);background:var(--danger-light);border-color:var(--danger)}
+.fh-badge.lv-watch{color:var(--warning);background:var(--warning-light);border-color:var(--warning)}
+.fh-badge.lv-ok{color:var(--success);background:var(--success-light);border-color:var(--success)}
+.fh-brief{font-size:11px;color:var(--text-light);margin-top:2px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .indicator-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
 .indicator-table th{background:var(--fill);padding:7px 10px;text-align:left;font-weight:700;color:var(--text-light);border-bottom:2px solid var(--border);font-size:11.5px}
 .indicator-table td{padding:7px 10px;border-bottom:1px solid var(--line)}
@@ -4980,12 +5002,60 @@ function renderOverallAnalysis(person){
       <div class="overall-tip">${a.tip}</div>
     </div>`;
 }
+function familyHealthBrief(person){
+  const h = person.health || {};
+  const conds = h.conditions || [];
+  const ind = healthIndicatorSummary(person);
+  const reminders = collectHealthReminders([person]);
+  const overdue = reminders.filter(r=>r.dd<0).length;
+  const soon = reminders.filter(r=>r.dd>=0 && r.dd<=30).length;
+  const parts = [];
+  if(conds.length) parts.push('关注项 '+conds.length);
+  const abn = ind ? (ind.counts.high + ind.counts.low + ind.counts.watch) : 0;
+  if(abn) parts.push('指标异常 '+abn);
+  if(overdue) parts.push('复查逾期 '+overdue);
+  else if(soon) parts.push('复查临近 '+soon);
+  if(!parts.length){
+    const repN = (person.reports||[]).length;
+    parts.push(repN ? ('检查记录 '+repN+' 份') : '暂无记录');
+  }
+  return parts.join(' · ');
+}
+function renderFamilyHealthOverview(people){
+  const list = people || [];
+  if(list.length < 2) return '';
+  const light = {high:'🔴', watch:'🟡', ok:'🟢', none:'⚪'};
+  const tally = {high:0, watch:0, ok:0, none:0};
+  const rows = list.map(person=>{
+    const a = analyzePersonHealth(person);
+    const level = a ? a.level : 'none';
+    const label = a ? a.levelLabel : '未建档';
+    tally[level] = (tally[level]||0) + 1;
+    return {person, level, label};
+  });
+  const cells = rows.map(r=>`<div class="fh-item lv-${r.level}" onclick="switchPerson('${jsq(r.person.id)}')" title="查看 ${esc(r.person.name)} 的健康档案">
+      <span class="fh-light">${light[r.level]||'⚪'}</span>
+      <span class="fh-emoji">${r.person.icon||'👤'}</span>
+      <div class="fh-main">
+        <div class="fh-name">${esc(r.person.name)}<span class="fh-badge lv-${r.level}">${esc(r.label)}</span></div>
+        <div class="fh-brief">${esc(familyHealthBrief(r.person))}</div>
+      </div>
+    </div>`).join('');
+  const sum = [['high','需重点关注'],['watch','需留意'],['ok','较平稳'],['none','未建档']]
+    .filter(x=>tally[x[0]]>0)
+    .map(x=>`<span class="fh-sum lv-${x[0]}">${light[x[0]]} ${x[1]} <b>${tally[x[0]]}</b></span>`).join('');
+  return `<div class="fh-overview">
+    <div class="fh-head"><span>🏠 家庭健康总览</span><div class="fh-sum-wrap">${sum}</div></div>
+    <div class="fh-grid">${cells}</div>
+  </div>`;
+}
 function renderHealthPanel(){
   const el = document.getElementById('healthPanel');
   if(!el) return;
   const people = currentPerson==='all' ? appData.people : appData.people.filter(p=>p.id===currentPerson);
   if(people.length === 0){ el.innerHTML=''; return; }
   const banner = renderReviewBanner(people);
+  const famHtml = currentPerson === 'all' ? renderFamilyHealthOverview(appData.people) : '';
   const cards = people.map(person=>{
     const h = person.health || {};
     const reports = person.reports || [];
@@ -5018,7 +5088,7 @@ function renderHealthPanel(){
       <div class="hc-actions"><button class="link-btn primary" onclick="openHealthModal('${jsq(person.id)}')">🩺 编辑健康档案</button></div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div>${banner}<div class="health-grid">${cards}</div></div>`;
+  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">记录身体状况、用药与各类检查（体检 / 看牙 / 拍片 / 门诊…，可上传图片 · PDF，也可手动填写）</div>${famHtml}${banner}<div class="health-grid">${cards}</div></div>`;
 }
 function openHealthModal(personId){
   healthContext = {personId, selectedReportId:null, pendingAnalysis:null, uploadCategory:'physical'};

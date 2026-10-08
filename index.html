@@ -368,6 +368,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .trend-unit{font-size:10.5px;color:var(--text-light);font-weight:400}
 .trend-svg{width:100%;height:auto;display:block;margin-top:4px}
 .trend-meta{font-size:10.5px;color:var(--text-light);margin-top:3px;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.pf-chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.pf-chip{font-size:11.5px;background:var(--fill);border:1px solid var(--border);border-radius:999px;padding:2px 10px;display:inline-flex;gap:5px;align-items:center;line-height:1.6}
+.pf-chip .pf-k{color:var(--text-light)}
+.overall-box{border:1.5px solid var(--border);border-radius:11px;background:var(--fill-2);padding:10px 12px;margin-top:6px}
+.overall-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.overall-level{font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;white-space:nowrap}
+.overall-level.ok{background:var(--success-light);color:var(--success)}
+.overall-level.watch{background:var(--warning-light);color:var(--warning)}
+.overall-level.high{background:var(--danger-light);color:var(--danger)}
+.overall-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:5px}
+.overall-list li{font-size:12px;line-height:1.55;display:flex;gap:7px;align-items:flex-start}
+.overall-dot{flex:0 0 auto;font-size:11px;line-height:1.5;color:var(--text-light)}
+.overall-tip{margin-top:8px;font-size:12px;color:var(--text-light);line-height:1.7;border-top:1px dashed var(--border);padding-top:8px}
 .indicator-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
 .indicator-table th{background:var(--fill);padding:7px 10px;text-align:left;font-weight:700;color:var(--text-light);border-bottom:2px solid var(--border);font-size:11.5px}
 .indicator-table td{padding:7px 10px;border-bottom:1px solid var(--line)}
@@ -4850,6 +4863,123 @@ function renderTrendCharts(person){
   }).join('');
   return `<div class="hc-field k" style="margin-top:2px">📈 指标趋势（跨报告，${names.length} 项）</div><div class="trend-grid">${cards}</div>`;
 }
+// ========== 个人画像 + 整体分析（本地规则）==========
+function personAge(birthYear){
+  const y = parseInt(birthYear, 10);
+  if(!y || y < 1900 || y > new Date().getFullYear()) return null;
+  const age = new Date().getFullYear() - y;
+  return (age >= 0 && age < 130) ? age : null;
+}
+function personBmi(height, weight){
+  const h = parseFloat(height), w = parseFloat(weight);
+  if(!(h > 0) || !(w > 0)) return null;
+  const bmi = w / Math.pow(h/100, 2);
+  return isFinite(bmi) ? Math.round(bmi*10)/10 : null;
+}
+function daysAgoText(dateStr){
+  const dd = daysUntil(dateStr);
+  if(dd === null) return '';
+  if(dd === 0) return '今天';
+  if(dd < 0) return (-dd) + ' 天前';
+  return '还有 ' + dd + ' 天';
+}
+function collectPersonProfile(person){
+  const h = person.health || {};
+  const pf = h.profile || {};
+  const chips = [];
+  const age = personAge(pf.birthYear);
+  if(age !== null) chips.push(['年龄', age + ' 岁']);
+  if(pf.gender) chips.push(['性别', pf.gender]);
+  if(pf.bloodType) chips.push(['血型', pf.bloodType]);
+  const bmi = personBmi(pf.height, pf.weight);
+  if(bmi !== null) chips.push(['BMI', String(bmi)]);
+  if(pf.allergies) chips.push(['过敏', pf.allergies]);
+  if(pf.history) chips.push(['既往', pf.history]);
+  if(pf.family) chips.push(['家族', pf.family]);
+  const reports = person.reports || [];
+  if(reports.length) chips.push(['检查记录', reports.length + ' 份']);
+  const conds = h.conditions || [];
+  if(conds.length) chips.push(['关注项', conds.length + ' 项']);
+  return chips;
+}
+function renderPersonProfile(person){
+  const chips = collectPersonProfile(person);
+  if(!chips.length) return '';
+  return `<div class="hc-field k" style="margin-top:2px">🧬 个人画像</div><div class="pf-chips">${chips.map(c=>`<span class="pf-chip"><span class="pf-k">${esc(c[0])}</span>${esc(String(c[1]))}</span>`).join('')}</div>`;
+}
+function analyzePersonHealth(person){
+  const h = person.health || {};
+  const conds = h.conditions || [];
+  const reports = (person.reports||[]).filter(r=>r.analysis && r.analysis.indicators && r.analysis.indicators.length);
+  const ind = healthIndicatorSummary(person);
+  const reminders = collectHealthReminders([person]);
+  const pf = h.profile || {};
+  const hasAnything = conds.length || reports.length || (h.status||'').trim() || (h.meds||'').trim() || Object.keys(pf).length;
+  if(!hasAnything) return null;
+
+  const items = [];
+  const activeC = conds.filter(c=>c.status==='active').length;
+  const observingC = conds.filter(c=>c.status==='observing').length;
+  const improvedC = conds.filter(c=>c.status==='improved').length;
+  if(conds.length){
+    const seg = [];
+    if(activeC) seg.push('治疗中 '+activeC);
+    if(observingC) seg.push('观察中 '+observingC);
+    if(improvedC) seg.push('好转 '+improvedC);
+    items.push({dot:'🫧', text:'关注项 '+conds.length+' 项'+(seg.length?' · '+seg.join(' · '):'')});
+  }
+  let highN = 0, lowN = 0, watchN = 0;
+  if(ind){
+    highN = ind.counts.high; lowN = ind.counts.low; watchN = ind.counts.watch;
+    const parts = [];
+    if(highN) parts.push('偏高 '+highN);
+    if(lowN) parts.push('偏低 '+lowN);
+    if(watchN) parts.push('关注 '+watchN);
+    const detail = parts.length ? parts.join(' · ') : (ind.total+' 项均在正常范围');
+    items.push({dot:'📈', text:'最近指标（'+esc(ind.latest.date||'未标日期')+'）：'+detail});
+  }
+  const overdue = reminders.filter(r=>r.dd<0).length;
+  const soon = reminders.filter(r=>r.dd>=0 && r.dd<=30).length;
+  const pendingConds = conds.filter(c=>c.status!=='resolved');
+  const noReview = pendingConds.filter(c=>!conditionNextDate(c)).length;
+  if(overdue || soon){
+    const seg = [];
+    if(overdue) seg.push('逾期 '+overdue+' 项');
+    if(soon) seg.push('30 天内 '+soon+' 项');
+    items.push({dot:'⏰', text:'复查提醒：'+seg.join(' · ')});
+  } else if(noReview){
+    items.push({dot:'⏰', text:'复查提醒：'+noReview+' 项未设置复查周期'});
+  } else if(pendingConds.length){
+    items.push({dot:'⏰', text:'复查提醒：暂无近期复查'});
+  }
+  const allReports = (person.reports||[]).slice().sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
+  if(allReports.length){
+    const last = allReports[0];
+    const ago = daysAgoText(last.date);
+    items.push({dot:'📅', text:'最近检查：'+esc(last.date||'未标日期')+(ago?'（'+ago+'）':'')+' · '+esc(last.name||'记录')});
+  }
+
+  let level = 'ok', levelLabel = '较平稳', tip = '各项较为平稳，保持规律作息、均衡饮食与年度体检即可。';
+  if(activeC > 0 || overdue > 0 || highN >= 3){
+    level = 'high'; levelLabel = '需重点关注';
+    tip = '存在需要重点关注的问题，建议尽快安排复查或就诊，并遵医嘱持续跟踪。';
+  } else if(observingC > 0 || soon > 0 || highN > 0 || lowN > 0 || watchN > 0){
+    level = 'watch'; levelLabel = '需留意';
+    tip = '有指标或关注项需要留意，建议按计划复查，注意饮食作息并持续记录趋势。';
+  }
+  return {level, levelLabel, tip, items};
+}
+function renderOverallAnalysis(person){
+  const a = analyzePersonHealth(person);
+  if(!a || !a.items.length) return '';
+  const list = a.items.map(it=>`<li><span class="overall-dot">${it.dot}</span><span>${it.text}</span></li>`).join('');
+  return `<div class="hc-field k" style="margin-top:2px">📊 整体分析</div>
+    <div class="overall-box">
+      <div class="overall-head"><span>综合评估</span><span class="overall-level ${a.level}">${a.levelLabel}</span></div>
+      <ul class="overall-list">${list}</ul>
+      <div class="overall-tip">${a.tip}</div>
+    </div>`;
+}
 function renderHealthPanel(){
   const el = document.getElementById('healthPanel');
   if(!el) return;
@@ -4864,6 +4994,8 @@ function renderHealthPanel(){
     const conds = h.conditions || [];
     const condHtml = conds.length ? `<div class="hc-field k" style="margin-top:2px">🫧 关注项（${conds.length}）</div>${renderConditionListHtml(conds, false)}` : '';
     const trendHtml = renderTrendCharts(person);
+    const profileHtml = renderPersonProfile(person);
+    const overallHtml = renderOverallAnalysis(person);
     const ind = healthIndicatorSummary(person);
     const indHtml = ind ? `<div class="hc-ind">
         <span class="ind-pill flag-ok">正常 ${ind.counts.ok}</span>
@@ -4877,6 +5009,8 @@ function renderHealthPanel(){
       <div class="hc-top"><div class="hc-icon">${person.icon}</div><div><div class="hc-name">${esc(person.name)}</div><div class="hc-sub">检查记录 ${reports.length} 份${h.updatedAt?' · 更新于 '+esc(String(h.updatedAt).slice(0,10)):''}</div></div></div>
       <div class="hc-field"><span class="k">身体状态：</span><span class="v">${esc(status)}</span></div>
       <div class="hc-field"><span class="k">目前用药：</span><span class="v">${esc(meds)}</span></div>
+      ${profileHtml}
+      ${overallHtml}
       ${indHtml}
       ${condHtml}
       ${trendHtml}
@@ -4899,6 +5033,7 @@ function renderHealthModal(){
     return;
   }
   const h = person.health || {};
+  const pf = h.profile || {};
   const reports = person.reports || [];
   document.getElementById('healthTitle').innerHTML = `🩺 健康档案 · ${person.icon} ${esc(person.name)}`;
 
@@ -4956,6 +5091,25 @@ function renderHealthModal(){
   document.getElementById('healthBody').innerHTML = `
     <div class="form-group"><label>身体状态</label><textarea id="h_status" rows="3" placeholder="如：整体健康，血压略偏高，正在调整饮食">${esc(h.status||'')}</textarea></div>
     <div class="form-group"><label>目前所吃药物</label><textarea id="h_meds" rows="3" placeholder="如：氨氯地平 5mg 每日一次">${esc(h.meds||'')}</textarea></div>
+    <div class="detail-section"><h3>🧬 个人画像（选填）</h3>
+      <div class="chat-hint" style="margin:0 0 4px">用于整体分析的基础信息，可只填已了解的项；年龄与 BMI 会据此自动计算。</div>
+      <div class="form-row">
+        <div class="form-group"><label>性别</label><select id="pf_gender"><option value="">未填</option>${['男','女','其他'].map(g=>`<option value="${g}" ${((pf.gender||'')===g)?'selected':''}>${g}</option>`).join('')}</select></div>
+        <div class="form-group"><label>出生年份</label><input type="number" id="pf_birth" min="1900" max="2100" value="${esc(pf.birthYear||'')}" placeholder="如 1980"></div>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label>血型</label><input id="pf_blood" value="${esc(pf.bloodType||'')}" placeholder="如 A / O / AB"></div>
+        <div class="form-group"><label>身高（cm）</label><input type="number" id="pf_height" value="${esc(pf.height||'')}" placeholder="如 170"></div>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label>体重（kg）</label><input type="number" id="pf_weight" value="${esc(pf.weight||'')}" placeholder="如 65"></div>
+        <div class="form-group"><label>过敏史</label><input id="pf_allergies" value="${esc(pf.allergies||'')}" placeholder="如 青霉素过敏"></div>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label>既往病史</label><input id="pf_history" value="${esc(pf.history||'')}" placeholder="如 高血压 / 甲状腺结节"></div>
+        <div class="form-group"><label>家族病史</label><input id="pf_family" value="${esc(pf.family||'')}" placeholder="如 糖尿病家族史"></div>
+      </div>
+    </div>
     <div class="detail-section"><h3>🫧 关注项（长期跟踪）</h3>
       <div class="chat-hint" style="margin:0 0 4px">记录结节 / 指标异常 / 慢病等需长期跟踪的问题，可设置复查周期并自动提醒。</div>
       ${renderConditionListHtml(conds, true)}
@@ -4984,6 +5138,17 @@ function saveHealth(){
   if(!person.health) person.health = {};
   person.health.status = val('h_status');
   person.health.meds = val('h_meds');
+  const profile = person.health.profile || {};
+  profile.gender = val('pf_gender');
+  profile.birthYear = val('pf_birth');
+  profile.bloodType = val('pf_blood');
+  profile.height = val('pf_height');
+  profile.weight = val('pf_weight');
+  profile.allergies = val('pf_allergies');
+  profile.history = val('pf_history');
+  profile.family = val('pf_family');
+  if(Object.keys(profile).some(k=>profile[k])) person.health.profile = profile;
+  else delete person.health.profile;
   person.health.updatedAt = new Date().toISOString();
   const rep = (person.reports||[]).find(r=>r.id===healthContext.selectedReportId);
   if(rep){

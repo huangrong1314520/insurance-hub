@@ -3167,9 +3167,8 @@ async function _renderPdfPages(host, arrayBuffer){
 //   ① 已配置云同步 → 用令牌从私有仓库 Contents API 取原始文件（公开页也能看原件）；
 //   ② 原件是绝对地址 / data: / blob: → 直接取；
 //   ③ 未配置 → 按相对路径取（从私有仓库本地打开时可用）。
-async function fetchPolicyPdfBlob(pol){
-  const rel = pol && pol.pdfFile;
-  if(!rel) throw new Error('该保单没有电子保单原件');
+async function fetchRepoFileBlob(rel){
+  if(!rel) throw new Error('没有可下载的原件');
   if(/^(https?:|data:|blob:)/i.test(rel)){
     const r = await _netFetch(rel, {cache:'no-store'});
     if(!r.ok) throw new Error('HTTP ' + r.status);
@@ -3188,6 +3187,11 @@ async function fetchPolicyPdfBlob(pol){
   const r = await _netFetch(rel, {cache:'no-store'});
   if(!r.ok) throw new Error('HTTP ' + r.status);
   return await r.blob();
+}
+async function fetchPolicyPdfBlob(pol){
+  const rel = pol && pol.pdfFile;
+  if(!rel) throw new Error('该保单没有电子保单原件');
+  return fetchRepoFileBlob(rel);
 }
 
 async function openPdfViewer(personId, policyId){
@@ -4660,16 +4664,35 @@ function healthDeleteReport(id){
   renderHealthPanel();
   showToast('已删除报告');
 }
-function downloadReport(id){
+async function downloadReport(id){
   const person = appData.people.find(p=>p.id===healthContext.personId);
   const rep = person && (person.reports||[]).find(r=>r.id===id);
   if(!rep) return;
-  const a = document.createElement('a');
-  a.href = rep.dataUrl;
-  a.download = rep.name || 'report';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const name = rep.name || 'report';
+  if(rep.dataUrl){
+    const a = document.createElement('a');
+    a.href = rep.dataUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  if(!rep.file){ showToast('该报告没有可下载的原件'); return; }
+  try{
+    showToast('正在获取原件…');
+    const blob = await fetchRepoFileBlob(rep.file);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_){} }, 60000);
+  }catch(err){
+    showToast('下载失败：' + (err && err.message ? err.message : err));
+  }
 }
 function compressImage(file, maxW){
   return new Promise((resolve)=>{

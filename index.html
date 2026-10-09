@@ -5354,7 +5354,7 @@ function renderHealthPanel(){
   const banner = renderReviewBanner(people);
   const famHtml = currentPerson === 'all' ? renderFamilyHealthOverview(appData.people) : '';
   const cards = people.map(person=>healthSummaryCardHtml(person)).join('');
-  el.innerHTML = `<div class="health-panel"><h2>🩺 健康档案</h2><div class="chat-hint" style="margin:0">点击成员卡片进入分类详情（总览分析 / 异常值 / 关注项 / 资料 / 时间轴），或点「编辑」录入</div>${famHtml}${banner}<div class="health-grid">${cards}</div></div>`;
+  el.innerHTML = `<div class="health-panel"><div class="chat-hint" style="margin:0">点击成员卡片进入分类详情（总览分析 / 异常值 / 关注项 / 资料 / 时间轴），或点「编辑」录入</div>${famHtml}${banner}<div class="health-grid">${cards}</div></div>`;
 }
 function openHealthModal(personId){
   healthContext = {personId, selectedReportId:null, pendingAnalysis:null, uploadCategory:'physical'};
